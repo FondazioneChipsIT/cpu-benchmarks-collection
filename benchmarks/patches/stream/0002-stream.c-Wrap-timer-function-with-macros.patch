@@ -1,0 +1,43 @@
+From 5add9ffaa5639806089205f6d8058851695efd2a Mon Sep 17 00:00:00 2001
+From: aottaviano <aottaviano@iis.ee.ethz.ch>
+Date: Mon, 7 Jul 2025 15:19:10 +0200
+Subject: [PATCH 2/2] stream.c: Wrap timer function with macros
+
+Aloows custom boards to define their own implementation
+---
+ stream.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/stream.c b/stream.c
+index 498ba4e..6a539de 100644
+--- a/stream.c
++++ b/stream.c
+@@ -45,7 +45,9 @@
+ # include <math.h>
+ # include <float.h>
+ # include <limits.h>
++#ifndef CUSTOM_MYSECOND
+ # include <sys/time.h>
++#endif
+ 
+ /*-----------------------------------------------------------------------
+  * INSTRUCTIONS:
+@@ -412,6 +414,7 @@ checktick()
+ 
+ 
+ 
++#ifndef CUSTOM_MYSECOND
+ /* A gettimeofday routine to give access to the wall
+    clock timer on most UNIX-like systems.  */
+ 
+@@ -426,6 +429,7 @@ double mysecond()
+         i = gettimeofday(&tp,&tzp);
+         return ( (double) tp.tv_sec + (double) tp.tv_usec * 1.e-6 );
+ }
++#endif
+ 
+ #ifndef abs
+ #define abs(a) ((a) >= 0 ? (a) : -(a))
+-- 
+2.43.5
+

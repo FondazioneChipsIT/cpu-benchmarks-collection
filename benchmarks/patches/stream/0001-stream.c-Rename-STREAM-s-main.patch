@@ -1,0 +1,28 @@
+From c2e23e01a93c40468843742bf96a1717a0f848d2 Mon Sep 17 00:00:00 2001
+From: aottaviano <aottaviano@iis.ee.ethz.ch>
+Date: Mon, 7 Jul 2025 15:17:12 +0200
+Subject: [PATCH 1/2] stream.c: Rename STREAM's main
+
+This allows to wrap `stream_main` in a top-level `main` with system
+initialisation etc, as this benchmark was not designed to be efficiently
+ported to different boards
+---
+ stream.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/stream.c b/stream.c
+index 9bbd6ce..498ba4e 100644
+--- a/stream.c
++++ b/stream.c
+@@ -205,7 +205,7 @@ extern void tuned_STREAM_Triad(STREAM_TYPE scalar);
+ extern int omp_get_num_threads();
+ #endif
+ int
+-main()
++stream_main()
+     {
+     int			quantum, checktick();
+     int			BytesPerWord;
+-- 
+2.43.5
+

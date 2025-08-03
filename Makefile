@@ -9,8 +9,9 @@ OBJCOPY := $(PLATFORM_CROSS_COMPILE)-objcopy
 OBJDUMP := $(PLATFORM_CROSS_COMPILE)-objdump
 
 # Platform and benchmark, these are just some defaults
-PLATFORM      ?= cheshire
-BENCHMARK     ?= embench-iot
+PLATFORM     ?= cheshire
+BENCHMARK    ?= embench-iot
+ALL_BENCHMARKS := $(notdir $(wildcard $(ROOT)/benchmarks/deps/*))
 
 # Per-platform config
 include $(ROOT)/target/$(PLATFORM)/target.mk
@@ -39,7 +40,7 @@ SUB_BMARK_DUMPS := $(foreach mem,$(PLAT_MEMORY),\
                    )
 
 # Default target: build all dumps
-all: $(SUB_BMARK_DUMPS)
+build: $(SUB_BMARK_DUMPS)
 
 $(info SUB_BMARK_ELFS = $(SUB_BMARK_ELFS))
 
@@ -70,3 +71,10 @@ $(foreach mem,$(PLAT_MEMORY),\
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
+
+# Build all available benchmarks
+.PHONY: all_benchmarks
+build-all:
+	@$(foreach bmark,$(ALL_BENCHMARKS), \
+		$(MAKE) build BENCHMARK=$(bmark) PLATFORM=$(PLATFORM) || exit $$?; \
+	)

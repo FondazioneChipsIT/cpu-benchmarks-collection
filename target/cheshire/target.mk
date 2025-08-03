@@ -2,11 +2,10 @@
 PLATFORM_SW_ROOT ?=
 
 # Directories within PLATFORM_SDK_ROOT
-PLAT_MEMORY      ?= dram
+PLAT_MEMORY      ?= dram spm
 PLAT_INCLUDE_DIR := $(PLATFORM_SW_ROOT)/include
 PLAT_LIB_DIR     := $(PLATFORM_SW_ROOT)/lib
 PLAT_LD_DIR      := $(PLATFORM_SW_ROOT)/link
-PLAT_LD_SCRIPT   := $(PLAT_LD_DIR)/$(PLAT_MEMORY).ld
 
 PLAT_FLAGS   = -DOT_PLATFORM_RV32 -march=rv64gc_zifencei -mabi=lp64d -mstrict-align -O3 -Wall -Wextra -static -ffunction-sections -fdata-sections -frandom-seed=cheshire -fuse-linker-plugin -flto -Wl,-flto
 PLAT_CFLAGS  = $(PLAT_FLAGS) -ggdb -mcmodel=medany -mexplicit-relocs -fno-builtin -fverbose-asm -pipe

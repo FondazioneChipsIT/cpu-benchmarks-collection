@@ -27,8 +27,16 @@ BENCH_PLAT_INCLUDES := -I$(BENCH_PLAT_DIR)/include
 # Output directory and files
 BUILD_DIR := build/$(PLATFORM)/$(BENCHMARK)
 
-SUB_BMARK_ELFS  := $(foreach bmark,$(bmarks),$(BUILD_DIR)/$(bmark)/$(bmark).$(PLAT_MEMORY).elf)
-SUB_BMARK_DUMPS := $(foreach bmark,$(bmarks),$(BUILD_DIR)/$(bmark)/$(bmark).$(PLAT_MEMORY).dump)
+SUB_BMARK_ELFS  := $(foreach mem,$(PLAT_MEMORY),\
+                     $(foreach bmark,$(bmarks),\
+                       $(BUILD_DIR)/$(bmark)/$(bmark).$(mem).elf\
+                     )\
+                   )
+SUB_BMARK_DUMPS := $(foreach mem,$(PLAT_MEMORY),\
+                     $(foreach bmark,$(bmarks),\
+                       $(BUILD_DIR)/$(bmark)/$(bmark).$(mem).dump\
+                     )\
+                   )
 
 # Default target: build all dumps
 all: $(SUB_BMARK_DUMPS)
@@ -39,21 +47,25 @@ $(info SUB_BMARK_ELFS = $(SUB_BMARK_ELFS))
 
 # Explicit rules for each benchmark
 define GEN_BENCHMARK_RULES
-$(BUILD_DIR)/$(1)/$(1).$(PLAT_MEMORY).elf:
+$(BUILD_DIR)/$(1)/$(1).$(2).elf:
 	@mkdir -p $(BUILD_DIR)/$(1)
 	$$(CC) $$(PLAT_CFLAGS) $$(BENCH_CFLAGS) \
 	       $$(BENCH_INCLUDES) $$(BENCH_PLAT_INCLUDES) $$(PLAT_INCLUDES) \
-	       -T$$(PLAT_LD_SCRIPT) \
+	       -T$$(PLAT_LD_DIR)/$(2).ld \
 	       -o $$@ \
 	       $$(BENCH_PLAT_SRCS) $$(BENCH_COMMON_SRCS) $$(call get-bmark-srcs,$(1)) \
 	       $$(PLAT_LDFLAGS) $$(PLAT_LIBS)
 
-$(BUILD_DIR)/$(1)/$(1).$(PLAT_MEMORY).dump: $(BUILD_DIR)/$(1)/$(1).$(PLAT_MEMORY).elf
+$(BUILD_DIR)/$(1)/$(1).$(2).dump: $(BUILD_DIR)/$(1)/$(1).$(2).elf
 	$$(OBJDUMP) -d -S $$< > $$@
 endef
 
 # Apply the above template to each benchmark
-$(foreach bmark,$(bmarks),$(eval $(call GEN_BENCHMARK_RULES,$(bmark))))
+$(foreach mem,$(PLAT_MEMORY),\
+	$(foreach bmark,$(bmarks),\
+		$(eval $(call GEN_BENCHMARK_RULES,$(bmark),$(mem)))\
+	)\
+)
 
 .PHONY: clean
 clean:

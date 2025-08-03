@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include "util.h"
+#include "dif/uart.h"
 
 #define CHAR_BIT 8
 

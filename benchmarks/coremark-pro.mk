@@ -29,4 +29,5 @@ endef
 # Include paths
 BENCH_INCLUDES := \
 	-I$(BENCH_MITH_DIR)/include \
+	-I$(BENCH_MITH_DIR)/al/include \
 	-I$(BENCH_KERNELS_DIR)

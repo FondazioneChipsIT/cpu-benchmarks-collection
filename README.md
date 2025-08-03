@@ -45,7 +45,7 @@ git submodule update --init --recursive
 ### Building a Benchmark
 To compile a benchmark for a given platform, first set the root of the platform
 SDK or environment (e.g. containing headers, runtime, etc.) as
-`PLATFORM_SDK_ROOT` and its toolchain as `PLATFORM_CROSS_COMPILE`:
+`PLATFORM_SW_ROOT` and its toolchain as `PLATFORM_CROSS_COMPILE`:
 
 Then build the target benchmark:
 
@@ -57,7 +57,7 @@ An example for the target `cheshire`, which integrates the RISC-V core CVA6,
 follows:
 
 ```
-export PLATFORM_ROOT=<abs_path_platform>/cheshire/sw
+export PLATFORM_SW_ROOT=<abs_path_platform>/cheshire/sw
 export PLATFORM_CROSS_COMPILE=<abs_path_toolchain>/bin/riscv64-unknown-elf
 make all BENCHMARK=coremark PLATFORM=cheshire
 ```

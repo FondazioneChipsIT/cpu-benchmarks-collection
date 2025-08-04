@@ -1,4 +1,4 @@
-// See LICENSE for license details.
+// See benchmarks/deps/riscv-tests/LICENSE for license details.
 
 #include <stdint.h>
 #include <string.h>

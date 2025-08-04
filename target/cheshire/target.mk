@@ -8,7 +8,7 @@ PLAT_LIB_DIR     := $(PLATFORM_SW_ROOT)/lib
 PLAT_LD_DIR      := $(PLATFORM_SW_ROOT)/link
 
 PLAT_FLAGS   = -DOT_PLATFORM_RV32 -march=rv64gc_zifencei -mabi=lp64d -mstrict-align -O3 -Wall -Wextra -static -ffunction-sections -fdata-sections -frandom-seed=cheshire -fuse-linker-plugin -flto -Wl,-flto
-PLAT_CFLAGS  = $(PLAT_FLAGS) -ggdb -mcmodel=medany -mexplicit-relocs -fno-builtin -fverbose-asm -pipe
+PLAT_CFLAGS  = $(PLAT_FLAGS) -ggdb -mcmodel=medany -mexplicit-relocs -fno-builtin -fverbose-asm -pipe -Wno-error=return-mismatch -Wno-error=implicit-int -Wno-error=implicit-function-declaration
 PLAT_LDFLAGS = $(PLAT_FLAGS) -nostartfiles -Wl,--gc-sections -Wl,-L$(PLAT_LD_DIR) -Wl,-L$(PLAT_LIB_DIR)
 
 # Include paths

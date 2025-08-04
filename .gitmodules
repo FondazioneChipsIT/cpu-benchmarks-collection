@@ -4,9 +4,6 @@
 [submodule "benchmarks/deps/riscv-tests"]
 	path = benchmarks/deps/riscv-tests
 	url = git@github.com:riscv-software-src/riscv-tests.git
-[submodule "benchmarks/deps/coremark-pro"]
-	path = benchmarks/deps/coremark-pro
-	url = git@github.com:eembc/coremark-pro.git
 [submodule "benchmarks/deps/embench-iot"]
 	path = benchmarks/deps/embench-iot
 	url = git@github.com:embench/embench-iot.git

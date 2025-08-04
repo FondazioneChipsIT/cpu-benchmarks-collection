@@ -26,7 +26,7 @@ BENCH_PLAT_SRCS     := $(wildcard $(BENCH_PLAT_DIR)/*.c)
 BENCH_PLAT_INCLUDES := -I$(BENCH_PLAT_DIR)/include
 
 # Output directory and files
-BUILD_DIR := build/$(PLATFORM)
+BUILD_DIR := build/$(PLATFORM)/$(BENCHMARK)
 
 SUB_BMARK_ELFS  := $(foreach mem,$(PLAT_MEMORY),\
                      $(foreach bmark,$(bmarks),\

@@ -42,12 +42,6 @@ rtems:
         RTEMS_DIR=$(RTEMS_DIR) \
         RTEMS_TOOLS=$(RTEMS_TOOLCHAIN_INSTALL_DIR)
 
-
-# Build Bringup-bench
-.PHONY: bringup-bench
-bringup-bench:
-	$(MAKE) -f $(ROOT)/benchmarks/bringup-bench.mk build
-
 # Benchmark-specific settings
 BENCH_DIR := $(ROOT)/benchmarks/deps/$(BENCHMARK)
 include $(ROOT)/benchmarks/$(BENCHMARK).mk

@@ -11,10 +11,42 @@ OBJDUMP := $(PLATFORM_CROSS_COMPILE)-objdump
 # Platform and benchmark, these are just some defaults
 PLATFORM     ?= cheshire
 BENCHMARK    ?= embench-iot
-ALL_BENCHMARKS := $(notdir $(wildcard $(ROOT)/benchmarks/deps/*))
+ALL_BENCHMARKS := $(notdir $(wildcard $(ROOT)/benchmarks/deps/*)) rtems-bsp
 
 # Per-platform config
 include $(ROOT)/target/$(PLATFORM)/target.mk
+
+# RTEMS + TOOLCHAIN INTEGRATION
+
+# Directory porting RTEMS
+RTEMS_PORTS_DIR := $(ROOT)/target/cheshire/ports/rtems
+
+# Directory toolchain 
+RTEMS_TOOLCHAIN_INSTALL_DIR := $(RTEMS_PORTS_DIR)/toolchain/compiler-strict
+
+# Directory RTEMS vanilla 
+RTEMS_DIR := $(ROOT)/benchmarks/deps/cheshire/rtems
+
+# Build toolchain RTEMS
+.PHONY: rtems-toolchain
+rtems-toolchain:
+	@echo "[TOOLCHAIN] Building strict-align toolchain..."
+	@$(RTEMS_PORTS_DIR)/toolchain/build-toolchain.sh \
+		$(RTEMS_PORTS_DIR)/toolchain/rsb-strict \
+		$(RTEMS_TOOLCHAIN_INSTALL_DIR)
+
+# Build BSP RTEMS
+.PHONY: rtems
+rtems:
+	$(MAKE) -f $(ROOT)/benchmarks/rtems-bsp.mk
+        RTEMS_DIR=$(RTEMS_DIR) \
+        RTEMS_TOOLS=$(RTEMS_TOOLCHAIN_INSTALL_DIR)
+
+
+# Build Bringup-bench
+.PHONY: bringup-bench
+bringup-bench:
+	$(MAKE) -f $(ROOT)/benchmarks/bringup-bench.mk build
 
 # Benchmark-specific settings
 BENCH_DIR := $(ROOT)/benchmarks/deps/$(BENCHMARK)

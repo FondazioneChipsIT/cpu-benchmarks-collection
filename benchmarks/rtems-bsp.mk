@@ -1,11 +1,12 @@
 # ============================================================
 # Cheshire RTEMS BSP — ports/rtems/Makefile
 # ============================================================
-BSP_DIR          := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-REPO_ROOT        := $(abspath $(BSP_DIR)/../../../..)
+ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
-RTEMS_DIR        ?= $(REPO_ROOT)/../rtems-project/rtems
-RTEMS_TOOLS      ?= $(REPO_ROOT)/../rtems-project/compiler-strict
+BSP_DIR          := $(ROOT)/target/cheshire/ports/rtems
+
+RTEMS_DIR        ?= $(ROOT)/benchmarks/deps/rtems
+RTEMS_TOOLS      ?= $(ROOT)/target/cheshire/ports/rtems/toolchain/compiler-strict
 PREFIX           ?= $(BSP_DIR)/install
 RTEMS_BSP        := riscv/rv64imafdc
 
@@ -19,17 +20,26 @@ GEN_SCRIPT       := $(BSP_DIR)/gen_dtb_header.py
 
 .DEFAULT_GOAL := all
 
+CONFIG_INI := $(RTEMS_DIR)/config.ini
+
 # ============================================================
 # Generazione DTB e header
 # ============================================================
 $(DTB_OUT): $(DTS_SRC)
 	@echo "[DTB] Compiling DTS -> DTB"
-	$(DTC) -I dts -O dtb -o $@ $
+	$(DTC) -I dts -O dtb -o $@ $<
 
 $(DTB_HEADER): $(DTB_OUT) $(GEN_SCRIPT)
 	@echo "[DTB] Generating C header from DTB"
 	$(PYTHON) $(GEN_SCRIPT) $< $@
+# ============================================================
+# RTEMS config.ini
+# ============================================================
+CONFIG_INI := $(RTEMS_DIR)/config.ini
 
+$(CONFIG_INI):
+	@echo "[riscv/rv64imafdc]" > $@
+	
 # ============================================================
 # Patch RTEMS
 # ============================================================
@@ -58,8 +68,10 @@ patch: $(DTB_HEADER)
 # ============================================================
 # Build RTEMS
 # ============================================================
+
+
 .PHONY: configure
-configure: patch
+configure: $(CONFIG_INI) patch
 	cd $(RTEMS_DIR) && \
 	PATH=$(RTEMS_TOOLS)/bin:$$PATH \
 	./waf configure \

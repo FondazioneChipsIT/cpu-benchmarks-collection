@@ -1,0 +1,115 @@
+# ============================================================
+# Bringup-Bench port for Cheshire
+# ============================================================
+BMARK_NAME    := bringup-bench
+BMARK_DIR     := $(DEPS_DIR)/bringup-bench
+BSP_DIR       := $(PORTS_DIR)/bringup-bench
+
+CC            := riscv-none-elf-gcc
+AR            := riscv-none-elf-ar
+
+CFLAGS_COMMON := -DTARGET_CHESHIRE \
+                 -march=rv64imafdc -mabi=lp64d \
+                 -mstrict-align -static -mcmodel=medany \
+                 -nostdlib -nostartfiles -ffreestanding \
+                 -fno-builtin -Wl,--no-relax \
+                 -Wall -O3 -g
+
+# include BSP libtarg.h before libtarg.h vanilla
+# (to include TARGET_CHESHIRE)
+CFLAGS_COMMON += -include $(BSP_DIR)/libtarg.h
+
+LIBTARG_SRC   := $(BSP_DIR)/libtarg.c
+CRT0_SRC      := $(BSP_DIR)/cheshire-crt0.S
+LD_SPM        := $(BSP_DIR)/link_spm.ld
+LD_DDR        := $(BSP_DIR)/link_dram.ld
+
+COMMON_DIR    := $(BMARK_DIR)/common
+TARGET_DIR    := $(BMARK_DIR)/target
+
+LIBMIN_SRCS   := $(wildcard $(COMMON_DIR)/libmin_*.c)
+LIBMIN_OBJS   := $(LIBMIN_SRCS:.c=.o)
+
+BMARKS := ackermann aes audio-codec avl-tree banner bit-kernels blake2b \
+          bloom-filter boyer-moore-search bubble-sort cipher congrad \
+          dhrystone distinctness fft-int flood-fill frac-calc fuzzy-match \
+          fy-shuffle gcd-list grad-descent graph-tests hanoi heapsort \
+          heat-calc huff-encode idct-alg indirect-test k-means kadane \
+          kepler knapsack knights-tour life longdiv lu-decomp lz-compress \
+          mandelbrot matmult max-subseq mersenne minspan monte-carlo \
+          moving-average murmur-hash n-queens natlog nbody-sim nr-solver \
+          packet-filter parrondo pascal pi-calc primal-test priority-queue \
+          qsort-demo qsort-test quaternions rand-test regex-parser \
+          rle-compress shortest-path sieve simple-grep skeleton spelt2num \
+          spirograph strange sudoku-solver tetris-sim tiny-NN topo-sort \
+          totient vectors-3d weekday
+
+# Escludi per SPM (64KB) — benchmark con binario troppo grande
+BMARKS_SPM_EXCLUDE := anagram c-interp checkers lz-compress rsa-cipher \
+                      pi-calc heldkarp-tsp rho-factor connect4-minimax \
+                      donut huff-encode matmult n-queens parrondo ransac \
+                      sudoku-solver ccmac
+
+BMARKS_DDR := $(BMARKS)
+BMARKS_SPM := $(filter-out $(BMARKS_SPM_EXCLUDE), $(BMARKS))
+
+# Build output directory
+BUILD_DIR     := $(BUILD_DIR)/bringup-bench
+
+.PHONY: bringup-bench-ddr bringup-bench-spm bringup-bench-all bringup-bench-clean
+
+$(BUILD_DIR):   
+	mkdir -p $@
+
+# Build libmin
+$(COMMON_DIR)/libmin.a: $(LIBMIN_OBJS)
+	$(AR) rcs $@ $^
+
+$(COMMON_DIR)/%.o: $(COMMON_DIR)/%.c
+	$(CC) $(CFLAGS_COMMON) -I$(COMMON_DIR) -I$(BSP_DIR) -c -o $@ $
+
+# Build libtarg
+$(BUILD_DIR)/libtarg.o: $(LIBTARG_SRC) | $(BUILD_DIR)
+	$(CC) $(CFLAGS_COMMON) -I$(COMMON_DIR) -I$(BSP_DIR) -c -o $@ $
+
+# Build crt0
+$(BUILD_DIR)/crt0.o: $(CRT0_SRC) | $(BUILD_DIR)
+	$(CC) $(CFLAGS_COMMON) -c -o $@ $
+
+# Build singolo benchmark DDR
+define BUILD_BMARK_DDR
+$(BUILD_DIR)/$(1).ddr.elf: $(BUILD_DIR)/libtarg.o $(BUILD_DIR)/crt0.o \
+							$(COMMON_DIR)/libmin.a | $(BUILD_DIR)$(CC) $(CFLAGS_COMMON) \
+	-I$(COMMON_DIR) -I$(BSP_DIR) -I$(TARGET_DIR) \
+	-T$(LD_DDR) \
+	$(BMARK_DIR)/$(1)/*.c \
+	$(BUILD_DIR)/libtarg.o \
+	$(CRT0_SRC) \
+	$(COMMON_DIR)/libmin.a \
+	-o $$@
+endef
+
+# Build singolo benchmark SPM
+define BUILD_BMARK_SPM
+$(BUILD_DIR)/$(1).spm.elf: $(BUILD_DIR)/libtarg.o $(BUILD_DIR)/crt0.o \
+							$(COMMON_DIR)/libmin.a | $(BUILD_DIR)
+	$(CC) $(CFLAGS_COMMON) \
+		-I$(COMMON_DIR) -I$(BSP_DIR) -I$(TARGET_DIR) \
+		-T$(LD_SPM) \
+		$(BMARK_DIR)/$(1)/*.c \
+		$(BUILD_DIR)/libtarg.o \
+		$(CRT0_SRC) \
+		$(COMMON_DIR)/libmin.a \
+		-o $$@
+endef
+
+$(foreach b,$(BMARKS_DDR),$(eval $(call BUILD_BMARK_DDR,$(b))))
+$(foreach b,$(BMARKS_SPM),$(eval $(call BUILD_BMARK_SPM,$(b))))
+
+bringup-bench-ddr: $(foreach b,$(BMARKS_DDR),$(BUILD_DIR)/$(b).ddr.elf)
+bringup-bench-spm: $(foreach b,$(BMARKS_SPM),$(BUILD_DIR)/$(b).spm.elf)
+bringup-bench-all: bringup-bench-ddr bringup-bench-spm
+
+bringup-bench-clean:
+	rm -rf $(BUILD_DIR)
+	rm -f $(COMMON_DIR)/libmin.a $(COMMON_DIR)/*.o

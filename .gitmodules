@@ -10,3 +10,9 @@
 [submodule "benchmarks/deps/stream"]
 	path = benchmarks/deps/stream
 	url = git@github.com:jeffhammond/STREAM.git
+[submodule "benchmarks/deps/rtems"]
+    path = benchmarks/deps/rtems
+    url = https://gitlab.rtems.org/rtems/rtos/rtems.git
+[submodule "benchmarks/deps/bringup-bench"]
+	path = benchmarks/deps/bringup-bench
+	url = https://github.com/toddmaustin/bringup-bench.git

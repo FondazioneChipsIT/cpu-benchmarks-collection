@@ -1,6 +1,5 @@
-# ============================================================
 # Cheshire RTEMS BSP — ports/rtems/Makefile
-# ============================================================
+
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 
 BSP_DIR          := $(ROOT)/target/cheshire/ports/rtems
@@ -22,9 +21,8 @@ GEN_SCRIPT       := $(BSP_DIR)/gen_dtb_header.py
 
 CONFIG_INI := $(RTEMS_DIR)/config.ini
 
-# ============================================================
-# Generazione DTB e header
-# ============================================================
+# DTB and header generation
+
 $(DTB_OUT): $(DTS_SRC)
 	@echo "[DTB] Compiling DTS -> DTB"
 	$(DTC) -I dts -O dtb -o $@ $<
@@ -32,17 +30,16 @@ $(DTB_OUT): $(DTS_SRC)
 $(DTB_HEADER): $(DTB_OUT) $(GEN_SCRIPT)
 	@echo "[DTB] Generating C header from DTB"
 	$(PYTHON) $(GEN_SCRIPT) $< $@
-# ============================================================
-# RTEMS config.ini
-# ============================================================
+
+# RTEMS config.ini generation
+
 CONFIG_INI := $(RTEMS_DIR)/config.ini
 
 $(CONFIG_INI):
 	@echo "[riscv/rv64imafdc]" > $@
 	
-# ============================================================
 # Patch RTEMS
-# ============================================================
+
 .PHONY: patch
 patch: $(DTB_HEADER)
 	@echo "[BSP] Copying Cheshire BSP files into RTEMS..."
@@ -65,10 +62,7 @@ patch: $(DTB_HEADER)
 	install -Dm644 $(BSP_DIR)/start.S \
 		$(RTEMS_DIR)/bsps/riscv/shared/start/start.S
 
-# ============================================================
 # Build RTEMS
-# ============================================================
-
 
 .PHONY: configure
 configure: $(CONFIG_INI) patch
@@ -94,9 +88,8 @@ install: build
 .PHONY: all
 all: install
 
-# ============================================================
 # Clean
-# ============================================================
+
 .PHONY: clean
 clean:
 	rm -f $(DTB_OUT) $(DTB_HEADER)

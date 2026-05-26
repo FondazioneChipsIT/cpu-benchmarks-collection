@@ -11,7 +11,10 @@ _start:
   .option norelax
   la sp, _boot_stack
   .option pop
-  li t0, (8*4096)
+
+# li t0, (8*4096)
+  li t0, (64*1024)
+
   add sp, sp, t0
 
   /* Disable all interrupts */
@@ -28,6 +31,8 @@ _start:
   li   t0, (3 << 13)       # Set mstatus.FS = Dirty
   csrs mstatus, t0
 
+
+  /* */
   /* clear BSS */
   la x26, _bss_start
   la x27, _bss_end
@@ -40,9 +45,12 @@ zero_loop:
   blt x26, x27, zero_loop
 zero_loop_end:
 
+  .global uart_init_cheshire
+  call uart_init_cheshire
   /* jump to main program entry point (argc = argv = 0) */
   addi x10, x0, 0
   addi x11, x0, 0
+
   jal x1, main
 
   /* if we return from main, call exit() */

@@ -6,34 +6,167 @@
 #define UART_BASE 0x3002000UL
 #define UART_THR  0x0UL
 
+#define UART_THR_OFF     (0  * 4)   /* Transmit Holding Register */
+#define UART_IER_OFF     (1  * 4)   /* Interrupt Enable */
+#define UART_FCR_OFF     (2  * 4)   /* FIFO Control */
+#define UART_LCR_OFF     (3  * 4)   /* Line Control */
+#define UART_MCR_OFF     (4  * 4)   /* Modem Control */
+#define UART_LSR_OFF     (5  * 4)   /* Line Status */
+#define UART_LSR_THRE    (1u << 5)  /* THR Empty — pronto per scrivere */
+#define UART_LSR_TEMT    (1u << 6)  /* Transmitter Empty — tutto trasmesso */
+
+#define CHESHIRE_REGS_BASE  0x3000000UL
+#define CHESHIRE_SCRATCH2   (CHESHIRE_REGS_BASE + 8UL)
+
+/* Accesso ai registri UART — uint32_t perché reg-shift=2 */
+static inline volatile uint32_t *uart_reg(uint32_t off) {
+    return (volatile uint32_t *)(UART_BASE + off);
+}
+
+/* ============================================================
+ * Inizializzazione UART
+ * Deve essere chiamata UNA VOLTA prima di qualsiasi scrittura
+ * ============================================================ */
+void uart_init_cheshire(void) {
+    /* 1. Disabilita tutti gli interrupt */
+    *uart_reg(UART_IER_OFF) = 0x00;
+
+    /* 2. Abilita DLAB per scrivere il divisore del baud rate */
+    *uart_reg(UART_LCR_OFF) = 0x80;
+
+    /* 3. Scrivi divisore: 50MHz / (115200 * 16) = 27 */
+    *uart_reg(UART_THR_OFF) = 27;   /* DLL = 27 (LSB) — stesso offset di THR con DLAB=1 */
+    *uart_reg(UART_IER_OFF) = 0;    /* DLM = 0  (MSB) — stesso offset di IER con DLAB=1 */
+
+    /* 4. Disabilita DLAB, imposta 8N1 (8 bit dati, no parità, 1 stop bit) */
+    *uart_reg(UART_LCR_OFF) = 0x03;
+
+    /* 5. Abilita FIFO, resetta TX e RX FIFO, soglia 14 byte */
+    *uart_reg(UART_FCR_OFF) = 0xC7;
+
+    /* 6. MCR: autoflow come da uart.c ufficiale Cheshire */
+    *uart_reg(UART_MCR_OFF) = 0x20;
+}
+
+/*
+void uart_init_cheshire(void) {
+    volatile uint32_t *regs = (volatile uint32_t *)UART_BASE;
+    regs[1] = 0x00;        // IER: disabilita interrupt
+    regs[3] = 0x80;        // LCR: DLAB=1
+    regs[0] = 27;         // DLL: divisore per 200MHz/16/115200   con 50 MHz è 27
+    regs[1] = 0x00;        // DLH: divisore alto
+    regs[3] = 0x03;        // LCR: 8N1, DLAB=0
+    regs[2] = 0x07;        // FCR: abilita e resetta FIFO
+    regs[4] = 0x03;        // MCR: DTR+RTS
+}
+
+*/
+//
+
+/*
+extern inline void
+_mmio_write8(uintptr_t addr, uint8_t value)
+{
+    *(volatile uint8_t *)addr = value;
+}
+
+extern inline int
+_cheshire_putchar(char c)
+{
+  //added now
+    _mmio_write8(UART_BASE + UART_THR, (uint8_t)c);
+    //
+
+    //(void)c;
+    return c; 
+}
+    */
+
+
+// added now    
 extern inline void
 _mmio_write32(uintptr_t addr, uint32_t value)
 {
   *(volatile uint32_t *)addr = value;
 }
 
+/*
 extern inline int
 _cheshire_putchar(char c)
 {
+volatile uint32_t *lsr = (volatile uint32_t *)(UART_BASE + 5 * 4);
+    volatile uint32_t *thr = (volatile uint32_t *)UART_BASE;
+
+    int timeout = 100000;
+    while ((((*lsr) & (1u << 5)) == 0) && timeout > 0)
+        timeout--;
+
+    *thr = (uint32_t)(unsigned char)c;
+    return c;
+}
+*/
+
+/*
+
+extern inline int
+_cheshire_putchar(char c)
+{   
+  //in caso togli:
     volatile uint32_t *lsr = (volatile uint32_t *)(UART_BASE + 5 * 4);
+  //  
     volatile uint32_t *thr = (volatile uint32_t *)(UART_BASE + 0 * 4);
 
-    // Aspetta che THR sia vuoto (bit 5)
-    while (((*lsr) & (1u << 5)) == 0)
+#ifdef TARGET_CHESHIRE_FPGA
+    volatile uint32_t *lsr = (volatile uint32_t *)(UART_BASE + 5 * 4);
+    int timeout = 100000;
+    while (((*lsr & (1u << 5)) == 0) && timeout-- > 0)
         ;
+// IN CASO TOGLI questo era fuori dall ifdef quando ha funzionato:
+    // Aspetta che THR sia vuoto (bit 5 = THRE) 
+    while ((*lsr & (1u << 5)) == 0)
+        ;
+//
+#endif
 
-    *thr = (uint32_t)c;
+// IN CASO TOGLI questo era fuori dall ifdef quando ha funzionato:
+    // Aspetta che THR sia vuoto (bit 5 = THRE) 
+    while ((*lsr & (1u << 5)) == 0)
+        ;
+//
 
+    *thr = (uint32_t)(unsigned char)c;
     return c;
 }
 
-#define CHESHIRE_REGS_BASE  0x3000000UL
-#define CHESHIRE_SCRATCH2   (CHESHIRE_REGS_BASE + 8UL)
+*/
+
+static int _cheshire_putchar(char c) {
+    /* Aspetta che il THR sia pronto (bit 5 del LSR) */
+    while ((*uart_reg(UART_LSR_OFF) & UART_LSR_THRE) == 0)
+        ;
+    *uart_reg(UART_THR_OFF) = (uint32_t)(unsigned char)c;
+    return c;
+}
+
+
 
 void _cheshire_exit(int code) __attribute__((noreturn));
 
 void _cheshire_exit(int code) {
     volatile uint32_t *scratch2 = (volatile uint32_t *)CHESHIRE_SCRATCH2;
+
+//In caso togli
+/*
+    volatile long i;
+    for (i = 0; i < 5000L; i++) __asm__ volatile("nop");
+
+*/
+
+    volatile int timeout = 10000000;
+    while (((*uart_reg(UART_LSR_OFF) & UART_LSR_TEMT) == 0) && timeout > 0)
+        timeout--;
+
+
     *scratch2 = (code << 1) | 1;
     while(1) __asm__ volatile("wfi");
 }
@@ -51,7 +184,26 @@ memcpy(void *dest, const void *src, size_t len)
 
 // Small local stack, since we are not using the C runtime startup files.
 // NOTE: If you change stack size, you must also update the cva6-crt0.S file.
-uint8_t _boot_stack[8*4096] __attribute__((aligned(16)));
+
+//momentaneamente tolto
+//uint8_t _boot_stack[8*4096] __attribute__((aligned(16)));  //32KB
+
+//SPM CONFIGURATION
+//uint8_t _boot_stack[32*1024] __attribute__((aligned(16)));
+
+uint8_t _boot_stack[64*1024] __attribute__((aligned(16)));
+
+//CAMBIATO MOMENTANEAMENTE
+//uint8_t _boot_stack[256*1024] __attribute__((aligned(16)));  // 256KB
+// cambiato stack per anagram
+//uint8_t _boot_stack[512*1024] __attribute__((aligned(16)));  // 512KB
+
+// In libtarg.c — massimizza lo stack
+//uint8_t _boot_stack[8*1024*1024] __attribute__((aligned(16)));  // 4MB
+
+/* ============================================================
+ * Helpers per exception handler
+ * ============================================================ */
 
 extern inline uint64_t
 _cheshire_get_mepc(void)
@@ -121,17 +273,30 @@ libtarg_fail(int code)
 }
 
 /* output a single character, to wherever the target wants to send it... */
-void
-libtarg_putc(char c)
+void libtarg_putc(char c)
 {
-  _cheshire_putchar(c);
+  /*
+    static int initialized = 0;
+    if (!initialized) {
+        uart_init_cheshire();
+        initialized = 1;
+    }
+    */
+
+    _cheshire_putchar(c);
 }
 
-#define MAX_HEAP    (512*1024)
+
+//modificato: 
+//#define MAX_HEAP    (512*1024)
+/*
 static uint8_t __heap[MAX_HEAP];
 static uint32_t __heap_ptr = 0;
+*/
+
 
 /* get some memory */
+/*
 void *
 libtarg_sbrk(size_t inc)
 {
@@ -146,42 +311,40 @@ libtarg_sbrk(size_t inc)
   return ptr;
 }
 
-#ifdef TARGET_PERFHOOKS
-#include <time.h>
+*/
 
-#if defined(TARGET_HOST)
-static long long __start_time = 0;
+// inizio modifica:
 
-long long
-__now_us(void)
+// per DRAM
+#define MAX_HEAP    (2*1024*1024)  // 2MB per DRAM
+
+//per SPM
+//#define MAX_HEAP (32*1024)  // 32KB heap
+
+// Allinea anche il buffer di base, per pulizia
+static uint8_t __heap[MAX_HEAP] __attribute__((aligned(16)));
+static uint32_t __heap_ptr = 0;
+
+void *
+libtarg_sbrk(size_t inc)
 {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return ts.tv_sec * 1000000LL + ts.tv_nsec / 1000LL;
-}
-#endif /* TARGET_HOST */
+  // Mantieni __heap_ptr sempre allineato a 8 byte
+  __heap_ptr = (__heap_ptr + 7u) & ~7u;
 
-void
-libtarg_start_perf(void)
-{
-  /* optional hook for starting perfomance monitoring/instrumentation */
+  uint32_t old_ptr = __heap_ptr;
 
-#if defined(TARGET_HOST)
-  __start_time = __now_us();
-#else
-#error Build requested TARGET_PERFHOOKS, but TARGET does not define libtarg_start_perf() and libtarg_stop_perf().
-#endif
+  if (inc == 0) {
+    return &__heap[old_ptr];
+  }
+
+  if (old_ptr + inc > MAX_HEAP) {
+    libtarg_fail(1);
+  }
+
+  __heap_ptr = old_ptr + inc;
+  return &__heap[old_ptr];
 }
 
-void
-libtarg_stop_perf(void)
-{
-  /* optional hook for starting perfomance monitoring/instrumentation */
-#if defined(TARGET_HOST)
-  uint64_t runtime = __now_us() - __start_time; 
-  fprintf(stderr, "PERF: program ran for %lu us.\n", runtime);
-#else
-#error Build requested TARGET_PERFHOOKS, but TARGET does not define libtarg_start_perf() and libtarg_stop_perf().
-#endif
-}
-#endif /* TARGET_PERFHOOKS */
+
+// fine modifica
+

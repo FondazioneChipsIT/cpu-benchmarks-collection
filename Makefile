@@ -2,7 +2,7 @@
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 # Toolchain binaries
-PLATFORM_CROSS_COMPILE ?= riscv64-unknown-elf-
+PLATFORM_CROSS_COMPILE ?= riscv64-unknown-elf
 CC      := $(PLATFORM_CROSS_COMPILE)-gcc
 AR      := $(PLATFORM_CROSS_COMPILE)-ar
 OBJCOPY := $(PLATFORM_CROSS_COMPILE)-objcopy
@@ -83,15 +83,18 @@ define GEN_BENCHMARK_RULES
 $(BUILD_DIR)/$(1)/$(1).$(2).elf:
 	@mkdir -p $(BUILD_DIR)/$(1)
 	$$(CC) $$(PLAT_CFLAGS) $$(BENCH_CFLAGS) \
-	       $$(BENCH_INCLUDES) $$(BENCH_PLAT_INCLUDES) $$(PLAT_INCLUDES) \
-	       -T$$(PLAT_LD_DIR)/$(2).ld \
-	       -o $$@ \
-	       $$(BENCH_PLAT_SRCS) $$(BENCH_COMMON_SRCS) $$(call get-bmark-srcs,$(1)) \
-	       $$(PLAT_LDFLAGS) $$(PLAT_LIBS)
+			$$(BENCH_INCLUDES) $$(BENCH_PLAT_INCLUDES) $$(PLAT_INCLUDES) \
+			-T$$(PLAT_LD_DIR)/$(2).ld \
+			-o $$@ \
+			$$(PLAT_STARTUP) \
+			$$(BENCH_PLAT_SRCS) $$(BENCH_COMMON_SRCS) \
+			$$(call get-bmark-srcs,$(1)) \
+			$$(PLAT_LDFLAGS) $$(PLAT_LIBS)
 
 $(BUILD_DIR)/$(1)/$(1).$(2).dump: $(BUILD_DIR)/$(1)/$(1).$(2).elf
 	$$(OBJDUMP) -d -S $$< > $$@
 endef
+
 
 # Apply the above template to each benchmark
 $(foreach mem,$(PLAT_MEMORY),\

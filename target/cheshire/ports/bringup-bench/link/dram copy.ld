@@ -18,15 +18,14 @@ ENTRY(_start)
 
 SECTIONS
 {
-  /* SPM */
-  . = 0x10000000;
+.text 0x80000000 :
+{
+    _start_text = .;
+    *(.text.init)
+    *(.text)
+    _end_text = .;
+}
 
-  _start_text = .;
-  .text.init : { *(.text.init) }
-  . = ALIGN(/* 0x1000*/ 16);
-  .text : { *(.text) }
-  . = ALIGN(/* 0x1000*/ 16);
-  _end_text = .;
   . = ALIGN(/* 0x1000*/ 16);
   .rodata : { *(.rodata*)}
   . = ALIGN(0x8);

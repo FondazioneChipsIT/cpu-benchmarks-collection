@@ -1,0 +1,18 @@
+# 
+# set BINARY /data2/fseratini/cheshire/sw/deps/cpu-benchmarks-collection/build/cheshire/bringup-bench/bubble-sort/bubble-sort.dram.elf
+# /data2/fseratini/cheshire/sw/deps/cpu-benchmarks-collection/build/cheshire/bringup-bench/bubble-sort/bubble-sort.dram.elf
+# 
+# set BOOTMODE 0
+# 0
+#  set PRELMODE 3
+# 3
+# 
+# source compile.cheshire_soc.tcl
+# couldn't read file "compile.cheshire_soc.tcl": no such file or directory
+# 
+# source start.cheshire_soc.tcl
+# couldn't read file "start.cheshire_soc.tcl": no such file or directory
+# 
+# run -all
+# 
+# No Design Loaded!

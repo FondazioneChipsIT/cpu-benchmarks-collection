@@ -5,6 +5,7 @@
 #if defined(TARGET_HOST) || defined(TARGET_SA) || defined(TARGET_HAHOST) || \
     defined(TARGET_SIMPLE) || defined(TARGET_SPIKE) || defined(TARGET_SPIKE_PK) || \
     defined(TARGET_HASPIKE) || defined(TARGET_CVA6_RV64) || defined(TARGET_CHESHIRE)
+
 #include <stdarg.h>
 #include <stdint.h>
 #include <stddef.h>

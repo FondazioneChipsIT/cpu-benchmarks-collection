@@ -3,6 +3,19 @@
 
 #if defined(TARGET_CHESHIRE)
 
+/*
+#if defined(TARGET_CHESHIRE_QUESTASIM)
+#define UART_CLK_HZ 200000000UL   // QuestaSim
+
+#elif defined(TARGET_CHESHIRE_FPGA)
+#define UART_CLK_HZ 50000000UL    // FPGA
+
+#endif
+
+#define UART_BAUDRATE 115200
+#define UART_DIVISOR (UART_CLK_HZ / (16 * UART_BAUDRATE))
+
+*/
 #define UART_BASE 0x3002000UL
 #define UART_THR  0x0UL
 
@@ -34,10 +47,14 @@ void uart_init_cheshire(void) {
     /* 2. Abilita DLAB per scrivere il divisore del baud rate */
     *uart_reg(UART_LCR_OFF) = 0x80;
 
-    /* 3. Scrivi divisore: 50MHz / (115200 * 16) = 27 */
+    /* 3. Scrivi divisore: 50MHz / (115200 * 16) = 27 , se vuoi 200MHz ->*/
     *uart_reg(UART_THR_OFF) = 27;   /* DLL = 27 (LSB) — stesso offset di THR con DLAB=1 */
     *uart_reg(UART_IER_OFF) = 0;    /* DLM = 0  (MSB) — stesso offset di IER con DLAB=1 */
-
+/*
+    uint32_t div = UART_DIVISOR;
+    *uart_reg(UART_THR_OFF) = div & 0xFF;        // DLL
+    *uart_reg(UART_IER_OFF) = (div >> 8) & 0xFF; // DLM
+*/
     /* 4. Disabilita DLAB, imposta 8N1 (8 bit dati, no parità, 1 stop bit) */
     *uart_reg(UART_LCR_OFF) = 0x03;
 
@@ -47,137 +64,42 @@ void uart_init_cheshire(void) {
     /* 6. MCR: autoflow come da uart.c ufficiale Cheshire */
     *uart_reg(UART_MCR_OFF) = 0x20;
 }
-
-/*
-void uart_init_cheshire(void) {
-    volatile uint32_t *regs = (volatile uint32_t *)UART_BASE;
-    regs[1] = 0x00;        // IER: disabilita interrupt
-    regs[3] = 0x80;        // LCR: DLAB=1
-    regs[0] = 27;         // DLL: divisore per 200MHz/16/115200   con 50 MHz è 27
-    regs[1] = 0x00;        // DLH: divisore alto
-    regs[3] = 0x03;        // LCR: 8N1, DLAB=0
-    regs[2] = 0x07;        // FCR: abilita e resetta FIFO
-    regs[4] = 0x03;        // MCR: DTR+RTS
-}
-
-*/
-//
-
-/*
-extern inline void
-_mmio_write8(uintptr_t addr, uint8_t value)
-{
-    *(volatile uint8_t *)addr = value;
-}
-
-extern inline int
-_cheshire_putchar(char c)
-{
-  //added now
-    _mmio_write8(UART_BASE + UART_THR, (uint8_t)c);
-    //
-
-    //(void)c;
-    return c; 
-}
-    */
-
-
-// added now    
+   
 extern inline void
 _mmio_write32(uintptr_t addr, uint32_t value)
 {
   *(volatile uint32_t *)addr = value;
 }
 
-/*
-extern inline int
-_cheshire_putchar(char c)
-{
-volatile uint32_t *lsr = (volatile uint32_t *)(UART_BASE + 5 * 4);
-    volatile uint32_t *thr = (volatile uint32_t *)UART_BASE;
-
-    int timeout = 100000;
-    while ((((*lsr) & (1u << 5)) == 0) && timeout > 0)
-        timeout--;
-
-    *thr = (uint32_t)(unsigned char)c;
-    return c;
-}
-*/
-
-/*
-
-extern inline int
-_cheshire_putchar(char c)
-{   
-  //in caso togli:
-    volatile uint32_t *lsr = (volatile uint32_t *)(UART_BASE + 5 * 4);
-  //  
-    volatile uint32_t *thr = (volatile uint32_t *)(UART_BASE + 0 * 4);
-
-#ifdef TARGET_CHESHIRE_FPGA
-    volatile uint32_t *lsr = (volatile uint32_t *)(UART_BASE + 5 * 4);
-    int timeout = 100000;
-    while (((*lsr & (1u << 5)) == 0) && timeout-- > 0)
-        ;
-// IN CASO TOGLI questo era fuori dall ifdef quando ha funzionato:
-    // Aspetta che THR sia vuoto (bit 5 = THRE) 
-    while ((*lsr & (1u << 5)) == 0)
-        ;
-//
-#endif
-
-// IN CASO TOGLI questo era fuori dall ifdef quando ha funzionato:
-    // Aspetta che THR sia vuoto (bit 5 = THRE) 
-    while ((*lsr & (1u << 5)) == 0)
-        ;
-//
-
-    *thr = (uint32_t)(unsigned char)c;
-    return c;
-}
-
-*/
-
 static int _cheshire_putchar(char c) {
-    /* Aspetta che il THR sia pronto (bit 5 del LSR) */
+/* Wait until the Transmit Holding Register (THR) is ready (LSR bit 5 set) */
     while ((*uart_reg(UART_LSR_OFF) & UART_LSR_THRE) == 0)
         ;
     *uart_reg(UART_THR_OFF) = (uint32_t)(unsigned char)c;
     return c;
 }
 
-
-
 void _cheshire_exit(int code) __attribute__((noreturn));
 
 void _cheshire_exit(int code) {
     volatile uint32_t *scratch2 = (volatile uint32_t *)CHESHIRE_SCRATCH2;
 
-//In caso togli
-/*
-    volatile long i;
-    for (i = 0; i < 5000L; i++) __asm__ volatile("nop");
-
-*/
-
     volatile int timeout = 10000000;
     while (((*uart_reg(UART_LSR_OFF) & UART_LSR_TEMT) == 0) && timeout > 0)
         timeout--;
 
-
     *scratch2 = (code << 1) | 1;
     while(1) __asm__ volatile("wfi");
 }
-extern inline void *
-memset(void *dest, int val, size_t len)
+
+__attribute__((used, noinline))
+void * memset(void *dest, int val, size_t len)
 {
   return libmin_memset(dest, val, len);
 }
 
-extern inline void *
-memcpy(void *dest, const void *src, size_t len)
+__attribute__((used, noinline))
+void * memcpy(void *dest, const void *src, size_t len)
 {
   return libmin_memcpy(dest, src, len);
 }
@@ -275,45 +197,8 @@ libtarg_fail(int code)
 /* output a single character, to wherever the target wants to send it... */
 void libtarg_putc(char c)
 {
-  /*
-    static int initialized = 0;
-    if (!initialized) {
-        uart_init_cheshire();
-        initialized = 1;
-    }
-    */
-
     _cheshire_putchar(c);
 }
-
-
-//modificato: 
-//#define MAX_HEAP    (512*1024)
-/*
-static uint8_t __heap[MAX_HEAP];
-static uint32_t __heap_ptr = 0;
-*/
-
-
-/* get some memory */
-/*
-void *
-libtarg_sbrk(size_t inc)
-{
-  uint8_t *ptr = &__heap[__heap_ptr];
-  if (inc == 0)
-    return ptr;
-  
-  __heap_ptr += inc;
-  if (__heap_ptr >= MAX_HEAP)
-    libtarg_fail(1);
-
-  return ptr;
-}
-
-*/
-
-// inizio modifica:
 
 // per DRAM
 #define MAX_HEAP    (2*1024*1024)  // 2MB per DRAM
@@ -344,7 +229,3 @@ libtarg_sbrk(size_t inc)
   __heap_ptr = old_ptr + inc;
   return &__heap[old_ptr];
 }
-
-
-// fine modifica
-

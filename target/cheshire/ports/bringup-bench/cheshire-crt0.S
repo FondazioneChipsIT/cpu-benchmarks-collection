@@ -12,9 +12,7 @@ _start:
   la sp, _boot_stack
   .option pop
 
-# li t0, (8*4096)
   li t0, (64*1024)
-
   add sp, sp, t0
 
   /* Disable all interrupts */

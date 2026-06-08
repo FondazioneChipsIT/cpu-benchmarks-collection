@@ -3,19 +3,6 @@
 
 #if defined(TARGET_CHESHIRE)
 
-/*
-#if defined(TARGET_CHESHIRE_QUESTASIM)
-#define UART_CLK_HZ 200000000UL   // QuestaSim
-
-#elif defined(TARGET_CHESHIRE_FPGA)
-#define UART_CLK_HZ 50000000UL    // FPGA
-
-#endif
-
-#define UART_BAUDRATE 115200
-#define UART_DIVISOR (UART_CLK_HZ / (16 * UART_BAUDRATE))
-
-*/
 #define UART_BASE 0x3002000UL
 #define UART_THR  0x0UL
 
@@ -36,32 +23,38 @@ static inline volatile uint32_t *uart_reg(uint32_t off) {
     return (volatile uint32_t *)(UART_BASE + off);
 }
 
+/* Clock UART:
+ *   FPGA:      50  MHz → divisore = 50000000  / (16 * 115200) = 27
+ *   QuestaSim: 200 MHz → divisore = 200000000 / (16 * 115200) = 108
+ */
+#ifdef TARGET_CHESHIRE_SIMULATOR
+#define UART_DIVISOR 108
+#else
+#define UART_DIVISOR 27
+#endif
+
 /* ============================================================
- * Inizializzazione UART
- * Deve essere chiamata UNA VOLTA prima di qualsiasi scrittura
+ * UART initialization
+ * Must be called ONCE before any write operation
  * ============================================================ */
 void uart_init_cheshire(void) {
-    /* 1. Disabilita tutti gli interrupt */
+    /* 1. Disable all interrupts */
     *uart_reg(UART_IER_OFF) = 0x00;
 
-    /* 2. Abilita DLAB per scrivere il divisore del baud rate */
+    /* 2. Enable DLAB to configure the baud rate divisor */
     *uart_reg(UART_LCR_OFF) = 0x80;
 
-    /* 3. Scrivi divisore: 50MHz / (115200 * 16) = 27 , se vuoi 200MHz ->*/
-    *uart_reg(UART_THR_OFF) = 27;   /* DLL = 27 (LSB) — stesso offset di THR con DLAB=1 */
-    *uart_reg(UART_IER_OFF) = 0;    /* DLM = 0  (MSB) — stesso offset di IER con DLAB=1 */
-/*
-    uint32_t div = UART_DIVISOR;
-    *uart_reg(UART_THR_OFF) = div & 0xFF;        // DLL
-    *uart_reg(UART_IER_OFF) = (div >> 8) & 0xFF; // DLM
-*/
-    /* 4. Disabilita DLAB, imposta 8N1 (8 bit dati, no parità, 1 stop bit) */
+    /* 3. Write divisor: DLL shares the same offset as THR when DLAB=1, DLM shares with IER */
+    *uart_reg(UART_THR_OFF) = UART_DIVISOR;   /* DLL (LSB) */
+    *uart_reg(UART_IER_OFF) = 0;              /* DLM = 0 */
+
+    /* 4. Disable DLAB, configure 8N1 (8 data bits, no parity, 1 stop bit) */
     *uart_reg(UART_LCR_OFF) = 0x03;
 
-    /* 5. Abilita FIFO, resetta TX e RX FIFO, soglia 14 byte */
+    /* 5. Enable FIFO, reset TX and RX FIFO, set threshold to 14 bytes */
     *uart_reg(UART_FCR_OFF) = 0xC7;
 
-    /* 6. MCR: autoflow come da uart.c ufficiale Cheshire */
+    /* 6. MCR: enable autoflow control matching the official Cheshire uart.c driver */
     *uart_reg(UART_MCR_OFF) = 0x20;
 }
    
@@ -104,24 +97,7 @@ void * memcpy(void *dest, const void *src, size_t len)
   return libmin_memcpy(dest, src, len);
 }
 
-// Small local stack, since we are not using the C runtime startup files.
-// NOTE: If you change stack size, you must also update the cva6-crt0.S file.
-
-//momentaneamente tolto
-//uint8_t _boot_stack[8*4096] __attribute__((aligned(16)));  //32KB
-
-//SPM CONFIGURATION
-//uint8_t _boot_stack[32*1024] __attribute__((aligned(16)));
-
-uint8_t _boot_stack[64*1024] __attribute__((aligned(16)));
-
-//CAMBIATO MOMENTANEAMENTE
-//uint8_t _boot_stack[256*1024] __attribute__((aligned(16)));  // 256KB
-// cambiato stack per anagram
-//uint8_t _boot_stack[512*1024] __attribute__((aligned(16)));  // 512KB
-
-// In libtarg.c — massimizza lo stack
-//uint8_t _boot_stack[8*1024*1024] __attribute__((aligned(16)));  // 4MB
+uint8_t _boot_stack[64*1024] __attribute__((aligned(16)));  
 
 /* ============================================================
  * Helpers per exception handler
@@ -178,7 +154,7 @@ _cheshire_timer_handler(void)
 #error Co-simulation platform not defined, define TARGET_HOST or a target-dependent definition.
 #endif
 
-//OUT OF TARGET SPECIFIC BLOCK
+// OUT OF TARGET SPECIFIC BLOCK
 
 /* benchmark completed successfully */
 __attribute__((noreturn)) void
@@ -200,20 +176,21 @@ void libtarg_putc(char c)
     _cheshire_putchar(c);
 }
 
-// per DRAM
+// DRAM heap configuration
 #define MAX_HEAP    (2*1024*1024)  // 2MB per DRAM
 
-//per SPM
-//#define MAX_HEAP (32*1024)  // 32KB heap
+// SPM heap configuration
+//#define MAX_HEAP (16*1024)  // 32KB heap
 
-// Allinea anche il buffer di base, per pulizia
+// Align the base buffer for memory safety and cleanliness
 static uint8_t __heap[MAX_HEAP] __attribute__((aligned(16)));
 static uint32_t __heap_ptr = 0;
 
 void *
 libtarg_sbrk(size_t inc)
 {
-  // Mantieni __heap_ptr sempre allineato a 8 byte
+  // Keep __heap_ptr 8-byte aligned for RV64 cores
+  // ld and sd instructions require 8-byte aligned memory addresses
   __heap_ptr = (__heap_ptr + 7u) & ~7u;
 
   uint32_t old_ptr = __heap_ptr;

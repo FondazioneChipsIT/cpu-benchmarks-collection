@@ -1,15 +1,15 @@
 [submodule "benchmarks/deps/coremark"]
 	path = benchmarks/deps/coremark
-	url = git@github.com:eembc/coremark.git
+	url = https://github.com/eembc/coremark.git
 [submodule "benchmarks/deps/riscv-tests"]
 	path = benchmarks/deps/riscv-tests
-	url = git@github.com:riscv-software-src/riscv-tests.git
+	url = https://github.com/riscv-software-src/riscv-tests.git
 [submodule "benchmarks/deps/embench-iot"]
 	path = benchmarks/deps/embench-iot
-	url = git@github.com:embench/embench-iot.git
+	url = https://github.com/embench/embench-iot.git
 [submodule "benchmarks/deps/stream"]
 	path = benchmarks/deps/stream
-	url = git@github.com:jeffhammond/STREAM.git
+	url = https://github.com/jeffhammond/STREAM.git
 [submodule "benchmarks/deps/rtems"]
     path = benchmarks/deps/rtems
     url = https://gitlab.rtems.org/rtems/rtos/rtems.git

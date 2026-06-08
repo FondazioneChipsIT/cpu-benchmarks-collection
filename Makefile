@@ -58,7 +58,11 @@ BENCH_PLAT_SRCS     := $(wildcard $(BENCH_PLAT_DIR)/*.c)
 BENCH_PLAT_INCLUDES := -I$(BENCH_PLAT_DIR)/include
 
 # Output directory and files
+ifeq ($(SIMULATOR),1)
+BUILD_DIR := build/$(PLATFORM)/bringup-bench-sim/$(BENCHMARK)
+else
 BUILD_DIR := build/$(PLATFORM)/$(BENCHMARK)
+endif
 
 SUB_BMARK_ELFS  := $(foreach mem,$(PLAT_MEMORY),\
                      $(foreach bmark,$(bmarks),\

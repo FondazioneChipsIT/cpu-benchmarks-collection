@@ -2,23 +2,24 @@
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 
-.section .text.init
-
 #ifndef STACK_SIZE
 #define STACK_SIZE (64*1024)
 #endif
 
+.section .text.init
 _start:
   .global _start
-
   .option push
   .option norelax
-  la sp, _boot_stack
+  # Cheshire usa __stack_pointer$ definito dal linker
+  # Non serve la e la add — lo stack pointer è già calcolato
+  # la sp, _boot_stack
+  la sp, __stack_pointer$    # simbolo del linker di Cheshire
   .option pop
 
   #li t0, (64*1024)
-  li t0, STACK_SIZE
-  add sp, sp, t0
+  #li t0, STACK_SIZE add sp,sp,t0
+
 
   /* Disable all interrupts */
   li    t0, 0x8             # MSTATUS_MIE
@@ -37,8 +38,11 @@ _start:
 
   /* */
   /* clear BSS */
-  la x26, _bss_start
-  la x27, _bss_end
+  #  la x26, _bss_start
+  #  la x27, _bss_end
+
+  la x26, __bss_start
+  la x27, __bss_end
 
   bge x26, x27, zero_loop_end
 
@@ -48,11 +52,14 @@ zero_loop:
   blt x26, x27, zero_loop
 zero_loop_end:
 
-  /* CANARY: DOPO il clear BSS, PRIMA di uart_init e main */
 #ifdef MEASURE_MEMORY
-  la   t0, _boot_stack
+  /* Stack cresce verso il basso da __stack_pointer$
+   * Bottom dello stack = __stack_pointer$ - STACK_SIZE */
+  la   t0, __stack_pointer$
+  li   t1, STACK_SIZE
+  sub  t0, t0, t1        # t0 = bottom dello stack
   mv   t1, sp
-  addi t1, t1, -256
+  addi t1, t1, -256      # lascia 256B in cima per il frame corrente
   li   t2, 0xDEADBEEF
   slli t2, t2, 32
   li   t3, 0xDEADBEEF

@@ -4,6 +4,10 @@
 
 .section .text.init
 
+#ifndef STACK_SIZE
+#define STACK_SIZE (64*1024)
+#endif
+
 _start:
   .global _start
 
@@ -12,7 +16,8 @@ _start:
   la sp, _boot_stack
   .option pop
 
-  li t0, (64*1024)
+  #li t0, (64*1024)
+  li t0, STACK_SIZE
   add sp, sp, t0
 
   /* Disable all interrupts */
@@ -42,6 +47,23 @@ zero_loop:
   addi x26, x26, 8
   blt x26, x27, zero_loop
 zero_loop_end:
+
+  /* CANARY: DOPO il clear BSS, PRIMA di uart_init e main */
+#ifdef MEASURE_MEMORY
+  la   t0, _boot_stack
+  mv   t1, sp
+  addi t1, t1, -256
+  li   t2, 0xDEADBEEF
+  slli t2, t2, 32
+  li   t3, 0xDEADBEEF
+  or   t2, t2, t3
+canary_loop:
+  bge  t0, t1, canary_done
+  sd   t2, 0(t0)
+  addi t0, t0, 8
+  j    canary_loop
+canary_done:
+#endif
 
   .global uart_init_cheshire
   call uart_init_cheshire

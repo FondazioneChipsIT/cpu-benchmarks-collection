@@ -1,9 +1,7 @@
 OUTPUT_ARCH("riscv")
 ENTRY(_start)
 
-MEMORY {
-    spm (rwx) : ORIGIN = 0x10000000, LENGTH = 0x00010000
-}
+
 
 SECTIONS
 {

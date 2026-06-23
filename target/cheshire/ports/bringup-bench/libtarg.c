@@ -1,6 +1,27 @@
 #include "libtarg.h"
 #include "libmin.h"
 
+
+#ifndef STACK_SIZE
+#define STACK_SIZE (64*1024)
+#endif
+#ifndef MAX_HEAP
+#define MAX_HEAP (2*1024*1024)
+#endif
+
+uint8_t _boot_stack[STACK_SIZE] __attribute__((aligned(16)));
+static uint8_t __heap[MAX_HEAP]  __attribute__((aligned(16)));
+
+
+
+#ifdef MEASURE_MEMORY
+#define STACK_CANARY_PATTERN 0xDEADBEEFDEADBEEFULL
+void stack_canary_init(void);
+uint32_t stack_canary_measure(void);
+static uint32_t __heap_peak = 0;
+#endif
+
+
 #if defined(TARGET_CHESHIRE)
 
 #define UART_BASE 0x3002000UL
@@ -97,8 +118,8 @@ void * memcpy(void *dest, const void *src, size_t len)
   return libmin_memcpy(dest, src, len);
 }
 
-uint8_t _boot_stack[64*1024] __attribute__((aligned(16)));  
-
+// uint8_t _boot_stack[64*1024] __attribute__((aligned(16)));  
+ 
 /* ============================================================
  * Helpers per exception handler
  * ============================================================ */
@@ -156,12 +177,27 @@ _cheshire_timer_handler(void)
 
 // OUT OF TARGET SPECIFIC BLOCK
 
+// OUT OF TARGET SPECIFIC BLOCK
+
 /* benchmark completed successfully */
+__attribute__((noreturn)) void libtarg_success(void) {
+#ifdef MEASURE_MEMORY
+    uint32_t stack_used = stack_canary_measure();
+    uint32_t heap_used  = __heap_peak;
+    /* Stampa misure su UART come commento dopo l'output normale */
+    libmin_printf("# STACK_USED: %u bytes\n", stack_used);
+    libmin_printf("# HEAP_USED:  %u bytes\n", heap_used);
+#endif
+    _cheshire_exit(0);
+}
+
+/*
 __attribute__((noreturn)) void
 libtarg_success(void)
 {
   _cheshire_exit(0);
 }
+  */
 
 /* benchmark completed with error CODE */
 __attribute__((noreturn)) void
@@ -176,16 +212,67 @@ void libtarg_putc(char c)
     _cheshire_putchar(c);
 }
 
-// DRAM heap configuration
-#define MAX_HEAP    (2*1024*1024)  // 2MB per DRAM
 
 // SPM heap configuration
 //#define MAX_HEAP (16*1024)  // 32KB heap
 
 // Align the base buffer for memory safety and cleanliness
-static uint8_t __heap[MAX_HEAP] __attribute__((aligned(16)));
+// static uint8_t __heap[MAX_HEAP] __attribute__((aligned(16)));
 static uint32_t __heap_ptr = 0;
 
+// test:
+
+/* Stack canary — rileva high watermark dello stack */
+
+
+#ifdef MEASURE_MEMORY
+void stack_canary_init(void) {
+    /* Lo stack cresce dall'alto verso il basso.
+     * sp parte da _boot_stack + STACK_SIZE.
+     * Inizializziamo tutta la zona bassa con il pattern —
+     * lasciando 256 byte in cima per il frame corrente. */
+    uint64_t *p   = (uint64_t *)_boot_stack;
+    uint64_t *end = (uint64_t *)(_boot_stack + STACK_SIZE - 256);
+    while (p < end) *p++ = STACK_CANARY_PATTERN;
+}
+
+uint32_t stack_canary_measure(void) {
+    /* Conta quanti byte dal BASSO sono ancora intatti (= non usati).
+     * Lo stack usato = STACK_SIZE - byte_intatti */
+    uint64_t *p   = (uint64_t *)_boot_stack;
+    uint64_t *end = (uint64_t *)(_boot_stack + STACK_SIZE);
+    uint32_t intact = 0;
+    while (p < end && *p == STACK_CANARY_PATTERN) {
+        p++;
+        intact += 8;
+    }
+    /* Byte effettivamente usati dallo stack */
+    return STACK_SIZE - intact;
+}
+#endif
+
+
+
+void *libtarg_sbrk(size_t inc) {
+    __heap_ptr = (__heap_ptr + 7u) & ~7u;
+    uint32_t old = __heap_ptr;
+
+    if (inc == 0) return &__heap[old];
+    if (old + (uint32_t)inc > MAX_HEAP) libtarg_fail(1);
+
+    __heap_ptr = old + (uint32_t)inc;
+
+#ifdef MEASURE_MEMORY
+    if (__heap_ptr > __heap_peak)
+        __heap_peak = __heap_ptr;
+#endif
+
+    return &__heap[old];
+}
+
+
+
+/*
 void *
 libtarg_sbrk(size_t inc)
 {
@@ -206,3 +293,4 @@ libtarg_sbrk(size_t inc)
   __heap_ptr = old_ptr + inc;
   return &__heap[old_ptr];
 }
+  */

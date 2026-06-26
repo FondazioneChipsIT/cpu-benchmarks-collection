@@ -16,3 +16,6 @@
 [submodule "benchmarks/deps/bringup-bench"]
 	path = benchmarks/deps/bringup-bench
 	url = https://github.com/toddmaustin/bringup-bench.git
+[submodule "benchmarks/deps/OBPMark"]
+	path = benchmarks/deps/OBPMark
+	url = https://github.com/OBPMark/OBPMark.git

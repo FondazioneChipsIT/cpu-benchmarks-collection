@@ -10,7 +10,7 @@ echo "[TOOLCHAIN] Starting build of strict-align toolchain..."
 
 echo "[TOOLCHAIN] Cloning RTEMS Source Builder..."
 if [ ! -d "$RSB_DIR" ]; then
-    git clone https://gitlab.rtems.org/rtems/tools/rtems-source-builder.git "$RSB_DIR"
+    git clone https://github.com/RTEMS/rtems-source-builder.git "$RSB_DIR"
     cd "$RSB_DIR"
     git checkout c282e2402dffd81a0bf03c1f72a05a51b7810517
 else

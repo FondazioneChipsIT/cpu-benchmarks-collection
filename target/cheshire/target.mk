@@ -1,4 +1,5 @@
-PLATFORM_SW_ROOT ?=
+PLATFORM_SW_ROOT := $(ROOT)/target/cheshire/sw
+
 PLAT_MEMORY      ?= dram spm
 PLAT_INCLUDE_DIR := $(PLATFORM_SW_ROOT)/include
 PLAT_LIB_DIR     := $(PLATFORM_SW_ROOT)/lib
@@ -13,6 +14,9 @@ PLAT_INCLUDES = \
         -I$(AXIRTROOT)/sw/lib \
         -I$(OTPROOT) \
         -I$(OTPROOT)/sw/include
+
+PLAT_INCLUDES += -I$(PLATFORM_SW_ROOT)/include
+
 PLAT_LIBS  := -lcheshire -lm
 PORTS_DIR  := $(ROOT)/target/$(PLATFORM)/ports
 DEPS_DIR   := $(ROOT)/benchmarks/deps

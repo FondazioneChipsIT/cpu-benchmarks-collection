@@ -22,19 +22,19 @@ TIMEOUT=${4:-$TEST_TIMEOUT}
 BAUD=115200
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ELF="$ROOT/build/cheshire/bringup-bench/$BENCH/$BENCH.spm.elf"
+ELF="$ROOT/build/cheshire/bringup-bench/$BENCH/$BENCH.dram.elf"
 REF="$ROOT/benchmarks/deps/bringup-bench/$BENCH/$BENCH.out"
 
 OUT="/tmp/${BENCH}_uart.txt"
 RAW="/tmp/${BENCH}_uart_raw.txt"
 
 if [ -z "$BENCH" ]; then
-    echo "Uso: $0 <benchmark>"
+    echo "Usage: $0 <benchmark>"
     exit 1
 fi
 
 if [ ! -f "$ELF" ]; then
-    echo "SKIP: ELF non trovato: $ELF"
+    echo "SKIP: ELF not found: $ELF"
     exit 2
 fi
 
@@ -48,7 +48,6 @@ if [ -n "$OLD_PICO" ]; then
 fi
 
 # Reset hardware via VIO (without touching OpenOCD)
-
 make -C $FPGA_SCRIPTS set_vio \
     VIO_PROBE=reset \
     VIO_COMMAND=1 \
@@ -86,7 +85,7 @@ riscv64-unknown-elf-gdb "$ELF" --batch \
     -ex "target extended-remote :$GDB_PORT" \
     -ex "monitor reset halt" \
     -ex "load" \
-    -ex "set \$pc = 0x10000000" \
+    -ex "set \$pc = 0x80000000" \
     -ex "continue" \
     >/dev/null 2>&1 &
 GDBPID=$!
@@ -121,7 +120,7 @@ fi
 
 # 8) Compare output
 if [ ! -f "$REF" ]; then
-    echo "⚠️  Nessun file .out per $BENCH"
+    echo "⚠️  No .out file found for $BENCH"
     cat "$OUT"
     exit 2
 fi

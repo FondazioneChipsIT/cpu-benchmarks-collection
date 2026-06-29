@@ -134,7 +134,7 @@ VIVADO_PORT      ?= 3334
 GDB_PORT         ?= 3333
 UART_DEV         ?= /dev/ttyUSB0
 TEST_TIMEOUT     ?= 20
-BENCHMARK        ?=
+TESTNAME        ?=
 
 FPGA_ENV := FPGA_SCRIPTS=$(FPGA_SCRIPTS_DIR) \
             USB_SERIAL=$(USB_SERIAL) \
@@ -155,4 +155,4 @@ fpga-run-all:
 	$(FPGA_ENV) bash scripts/bringup-bench-scripts/run_all_tests.sh
 
 fpga-run-one:
-	$(FPGA_ENV) bash scripts/bringup-bench-scripts/run_test.sh $(BENCHMARK)
+	$(FPGA_ENV) bash scripts/bringup-bench-scripts/run_test.sh $(TESTNAME) $(GDB_PORT) $(UART_DEV) $(TEST_TIMEOUT)

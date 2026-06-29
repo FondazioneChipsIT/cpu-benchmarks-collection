@@ -41,7 +41,7 @@ done
 
 echo ""
 echo "═══════════════════════════════════════"
-echo "RISULTATI FINALI"
+echo "FINAL RESULTS"
 echo "PASS: $PASS"
 echo "FAIL: $FAIL"
 echo "SKIP: $SKIP"

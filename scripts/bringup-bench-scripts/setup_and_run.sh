@@ -19,7 +19,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 : ${UART_DEV:=/dev/ttyUSB0}
 : ${TEST_TIMEOUT:=20}
 
-echo "=== Configurazione ==="
+echo "=== Configuration ==="
 echo "  FPGA_SCRIPTS  = $FPGA_SCRIPTS"
 echo "  USB_SERIAL    = $USB_SERIAL"
 echo "  DEVICE        = $DEVICE"
@@ -30,7 +30,7 @@ echo "  UART_DEV      = $UART_DEV"
 echo "  TEST_TIMEOUT  = $TEST_TIMEOUT"
 
 # 1) Program the FPGA board
-echo "=== Programmazione FPGA ==="
+echo "=== FPGA Programming ==="
 pkill hw_server 2>/dev/null || true
 sleep 1
 make -C $FPGA_SCRIPTS program \
@@ -38,10 +38,10 @@ make -C $FPGA_SCRIPTS program \
     PROJECT_NAME=$PROJECT_NAME \
     USB_SERIAL=$USB_SERIAL \
     PORT=$VIVADO_PORT
-echo "=== FPGA programmata ==="
+echo "=== FPGA programmed ==="
 
 # 2) Launch OpenOCD in background
-echo "=== Avvio OpenOCD ==="
+echo "=== Launching OpenOCD ==="
 pkill openocd 2>/dev/null || true
 sleep 1
 openocd \
@@ -51,8 +51,8 @@ openocd \
     -f $OPENOCD_SCRIPT \
     >/tmp/openocd.log 2>&1 &
 sleep 4
-echo "=== OpenOCD avviato (log: /tmp/openocd.log) ==="
+echo "=== OpenOCD started (log: /tmp/openocd.log) ==="
 
 # 3) Run all benchmarks
-echo "=== Avvio test ==="
+echo "=== Starting tests ==="
 bash "$SCRIPT_DIR/run_all_tests.sh" $GDB_PORT $UART_DEV $TEST_TIMEOUT

@@ -1,32 +1,42 @@
-# benchmarks/riscv-tests/benchmark.mk
+# ==============================================================================s
+# NOTE ON EMBENCH-IOT SUBMODULE:
+# Ensure the submodule in 'benchmarks/deps/embench-iot' points to 
+# 'upstream/embench-2.0-branch' or 'upstream/master'.
+# ==============================================================================
 
-# List of sub-benchmarks
+# ------------------------------------------------------------
+# Benchmark list
+# ------------------------------------------------------------
 base_bmarks = \
-	aha-mont64     \
-	crc32	       \
-	cubic	       \
-	edn	       \
-	huffbench      \
-	matmult-int    \
-	md5sum	       \
-	minver	       \
-	nbody	       \
-	nettle-aes     \
-	nettle-sha256  \
-	nsichneu       \
-	picojpeg       \
-	primecount     \
-	qrduino	       \
-	sglib-combined \
-	slre	       \
-	st	       \
-	statemate      \
-	tarfind	       \
-	ud	       
+    aha-mont64     \
+    crc32          \
+    depthconv      \
+    edn            \
+    huffbench      \
+    matmult-int    \
+    md5sum         \
+    nettle-aes     \
+    nettle-sha256  \
+    nsichneu       \
+    picojpeg       \
+    qrduino        \
+    sglib-combined \
+    slre           \
+    statemate      \
+    tarfind        \
+    ud             \
+    wikisort       \
+    xgboost
 
+ifdef TEST
+bmarks := $(filter $(TEST),$(base_bmarks))
+else
 bmarks := $(base_bmarks)
-
-# Function to resolve sources for a given benchmark name
+endif
+# ------------------------------------------------------------
+# Source resolution
+# embench-iot sources live under src/<benchmark>/
+# ------------------------------------------------------------
 define get-bmark-srcs
 $(wildcard $(BENCH_DIR)/src/$(1)/*.c)
 endef
@@ -34,5 +44,18 @@ endef
 # Include paths
 BENCH_INCLUDES := \
 	$(addprefix -I$(BENCH_DIR)/benchmarks/, $(bmarks))
+# ------------------------------------------------------------
+# Compiler flags
+# ------------------------------------------------------------
+# embench-iot requires CPU_MHZ for its timing model and
+# GLOBAL_SCALE_FACTOR to normalise scores.
+BENCH_CFLAGS += -DCPU_MHZ=50 -DGLOBAL_SCALE_FACTOR=1 
 
-BENCH_CFLAGS := -DCPU_MHZ=50
+
+# wikisort defines a local 'bool' that conflicts with <stdbool.h>.
+# Rename it only for wikisort targets to avoid polluting other benchmarks.
+%wikisort.spm.elf %wikisort.dram.elf: BENCH_CFLAGS += -Dbool=wikisort_bool_t
+
+# ADD libc e libgcc only for embench-iot
+PLAT_LIBS += -lc -lgcc
+

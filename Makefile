@@ -1,95 +1,114 @@
-# Makefile (root-level)
+# ============================================================
+# CPU-Benchmarks-Collection Makefile
+# ============================================================
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+.DEFAULT_GOAL := all
 
-# Toolchain binaries
+# ------------------------------------------------------------
+# Toolchain
+# ------------------------------------------------------------
 PLATFORM_CROSS_COMPILE ?= riscv64-unknown-elf
 CC      := $(PLATFORM_CROSS_COMPILE)-gcc
 AR      := $(PLATFORM_CROSS_COMPILE)-ar
 OBJCOPY := $(PLATFORM_CROSS_COMPILE)-objcopy
 OBJDUMP := $(PLATFORM_CROSS_COMPILE)-objdump
 
-# Platform and benchmark, these are just some defaults
+# ------------------------------------------------------------
+# Platform & benchmark selection
+# ------------------------------------------------------------
 PLATFORM     ?= cheshire
 BENCHMARK    ?= embench-iot
+
 ALL_BENCHMARKS := $(notdir $(wildcard $(ROOT)/benchmarks/deps/*)) rtems-bsp
 
-# Per-platform config
-include $(ROOT)/target/$(PLATFORM)/target.mk
+# ------------------------------------------------------------
+# RTEMS paths
+# -----------------------------------------------------------
+RTEMS_PORTS_DIR := $(ROOT)/target/$(PLATFORM)/ports/rtems
+RTEMS_TOOLCHAIN_INSTALL_DIR := $(RTEMS_PORTS_DIR)/toolchain/compiler-strict 
+RTEMS_DIR := $(ROOT)/benchmarks/deps/rtems
 
-# RTEMS + TOOLCHAIN INTEGRATION
+# ------------------------------------------------------------
+# Per-platform configuration
+# ------------------------------------------------------------
+-include $(ROOT)/target/$(PLATFORM)/target.mk
 
-# Directory porting RTEMS
-RTEMS_PORTS_DIR := $(ROOT)/target/cheshire/ports/rtems
-
-# Directory toolchain 
-RTEMS_TOOLCHAIN_INSTALL_DIR := $(RTEMS_PORTS_DIR)/toolchain/compiler-strict
-
-# Directory RTEMS vanilla 
-RTEMS_DIR := $(ROOT)/benchmarks/deps/cheshire/rtems
-
-# Build toolchain RTEMS
-.PHONY: rtems-toolchain
-rtems-toolchain:
-	@echo "[TOOLCHAIN] Building strict-align toolchain..."
-	@$(RTEMS_PORTS_DIR)/toolchain/build-toolchain.sh \
-		$(RTEMS_PORTS_DIR)/toolchain/rsb-strict \
-		$(RTEMS_TOOLCHAIN_INSTALL_DIR)
-
-# Build BSP RTEMS
-.PHONY: rtems
-rtems:
-	$(MAKE) -f $(ROOT)/benchmarks/rtems-bsp.mk
-        RTEMS_DIR=$(RTEMS_DIR) \
-        RTEMS_TOOLS=$(RTEMS_TOOLCHAIN_INSTALL_DIR)
-
-
-# Build Bringup-bench
-.PHONY: bringup-bench
-bringup-bench:
-	$(MAKE) -f $(ROOT)/benchmarks/bringup-bench.mk build
-
-# Benchmark-specific settings
+# ============================================================
+# Benchmark-specific settings & Build Engine
+# ============================================================
 BENCH_DIR := $(ROOT)/benchmarks/deps/$(BENCHMARK)
-include $(ROOT)/benchmarks/$(BENCHMARK).mk
+-include $(ROOT)/benchmarks/$(BENCHMARK).mk
 
-# Platform-specific additions
+# ------------------------------------------------------------
+# Optional single-benchmark / single-memory filter
+#   make BENCHMARK=bringup-bench TEST=aes
+#   make BENCHMARK=bringup-bench MEM=dram
+# Filtering is done inside each fragment (TEST); MEM filters
+# PLAT_MEMORY here so GEN_BENCHMARK_RULES sees the right set.
+# ------------------------------------------------------------
+ifdef MEM
+PLAT_MEMORY := $(filter $(MEM),$(PLAT_MEMORY))
+endif
+
+# Default implementation
+ifndef bmarks_for_mem
+bmarks_for_mem = $(bmarks)
+endif
+
+# ------------------------------------------------------------
+# Platform-specific port additions (sources & includes)
+# ------------------------------------------------------------
 BENCH_PLAT_DIR      := $(ROOT)/target/$(PLATFORM)/ports/$(BENCHMARK)
 BENCH_PLAT_SRCS     := $(wildcard $(BENCH_PLAT_DIR)/*.c)
 BENCH_PLAT_INCLUDES := -I$(BENCH_PLAT_DIR)/include
 
-# Output directory and files
-ifeq ($(SIMULATOR),1)
-BUILD_DIR := build/$(PLATFORM)/bringup-bench-sim/$(BENCHMARK)
-else
-BUILD_DIR := build/$(PLATFORM)/$(BENCHMARK)
-endif
+BUILD_DIR ?= build/$(PLATFORM)/$(BENCHMARK)
+
+
+# Helper function for memory flags (SPM vs DRAM)
+get_mem_flags = $(if $(and $(filter spm,$(1)),$(STACK_SIZE_SPM)),\
+                  -DSTACK_SIZE=$(STACK_SIZE_SPM) -DMAX_HEAP=$(HEAP_SIZE_SPM),\
+                $(if $(and $(filter dram,$(1)),$(STACK_SIZE_DRAM)),\
+                  -DSTACK_SIZE=$(STACK_SIZE_DRAM) -DMAX_HEAP=$(HEAP_SIZE_DRAM),\
+                ))
+
+# ------------------------------------------------------------
+# Target lists (elf + disassembly)
+# ------------------------------------------------------------
 
 SUB_BMARK_ELFS  := $(foreach mem,$(PLAT_MEMORY),\
                      $(foreach bmark,$(call bmarks_for_mem,$(mem)),\
                        $(BUILD_DIR)/$(bmark)/$(bmark).$(mem).elf\
                      )\
                    )
+
 SUB_BMARK_DUMPS := $(foreach mem,$(PLAT_MEMORY),\
                      $(foreach bmark,$(call bmarks_for_mem,$(mem)),\
                        $(BUILD_DIR)/$(bmark)/$(bmark).$(mem).dump\
                      )\
                    )
 
-# Default target: build all dumps
+# ------------------------------------------------------------
+# Top-level targets
+# ------------------------------------------------------------
+.PHONY: all build
+all: build
 build: $(SUB_BMARK_DUMPS)
 
-$(info SUB_BMARK_ELFS = $(SUB_BMARK_ELFS))
+# To be added
+#$(info SUB_BMARK_ELFS = $(SUB_BMARK_ELFS))
 
 .PRECIOUS: $(SUB_BMARK_ELFS)
 
-# Explicit rules for each benchmark
+# ------------------------------------------------------------
+# Per-benchmark build rule template
+# $(1) = benchmark name   $(2) = memory target (spm | dram)
+# ------------------------------------------------------------
 define GEN_BENCHMARK_RULES
 $(BUILD_DIR)/$(1)/$(1).$(2).elf:
 	@mkdir -p $(BUILD_DIR)/$(1)
 	$$(CC) $$(PLAT_CFLAGS) $$(BENCH_CFLAGS) $$(EXTRA_CFLAGS) \
-			$(if $(filter spm,$(2)),\
-				-DSTACK_SIZE=$(STACK_SIZE_SPM) -DMAX_HEAP=$(HEAP_SIZE_SPM),\
-				-DSTACK_SIZE=$(STACK_SIZE_DRAM) -DMAX_HEAP=$(HEAP_SIZE_DRAM)) \
+			$(call get_mem_flags,$(2)) \
 			$$(BENCH_INCLUDES) $$(BENCH_PLAT_INCLUDES) $$(PLAT_INCLUDES) \
 			-T$$(PLAT_LD_DIR)/$(2).ld \
 			-Wl,-L$$(PLAT_LD_DIR) \
@@ -103,17 +122,45 @@ $(BUILD_DIR)/$(1)/$(1).$(2).dump: $(BUILD_DIR)/$(1)/$(1).$(2).elf
 	$$(OBJDUMP) -d -S $$< > $$@
 endef
 
-
 # Apply the above template to each benchmark
-
 $(foreach mem,$(PLAT_MEMORY),\
     $(foreach bmark,$(call bmarks_for_mem,$(mem)),\
         $(eval $(call GEN_BENCHMARK_RULES,$(bmark),$(mem)))\
     )\
 )
-.PHONY: clean
-clean:
-	rm -rf $(BUILD_DIR)
+
+# ============================================================
+# Convenience top-level aliases
+# ============================================================
+.PHONY: bringup-bench
+bringup-bench:
+	$(MAKE) BENCHMARK=bringup-bench build
+
+.PHONY: rtems rtems-bsp
+rtems rtems-bsp:
+	$(MAKE) BENCHMARK=rtems build PLATFORM=$(PLATFORM)
+
+# Build toolchain RTEMS
+.PHONY: rtems-toolchain
+rtems-toolchain:
+	@echo "[TOOLCHAIN] Building strict-align toolchain..."
+	@$(RTEMS_PORTS_DIR)/toolchain/build-toolchain.sh \
+		$(RTEMS_PORTS_DIR)/toolchain/rsb-strict \
+		$(RTEMS_TOOLCHAIN_INSTALL_DIR)
+
+# Se BENCHMARK e' rtems o rtems-bsp, delega a rtems-bsp.mk
+ifeq ($(filter rtems rtems-bsp,$(BENCHMARK)),$(BENCHMARK))
+build:
+	@echo "[RTEMS] Compiling BSP RTEMS for $(PLATFORM)..."
+	$(MAKE) -f $(ROOT)/benchmarks/rtems-bsp.mk \
+		PLATFORM=$(PLATFORM) \
+		RTEMS_TOOLS=$(RTEMS_TOOLCHAIN_INSTALL_DIR) \
+		BSP_DIR=$(RTEMS_PORTS_DIR) \
+		all
+else
+build: $(SUB_BMARK_DUMPS)
+endif
+
 
 # Build all available benchmarks
 .PHONY: all_benchmarks
@@ -121,38 +168,81 @@ build-all:
 	@$(foreach bmark,$(ALL_BENCHMARKS), \
 		$(MAKE) build BENCHMARK=$(bmark) PLATFORM=$(PLATFORM) || exit $$?; \
 	)
+	
+# ------------------------------------------------------------
+# OBPMark
+# Usage:
+#   make obpmark PLATFORM=cheshire
+#   make obpmark PLATFORM=astral TEST=1.1-image_calibration IMPL=openmp
+#   make obpmark-rtems PLATFORM=cheshire
+#   make obpmark-linux PLATFORM=astral
+# ------------------------------------------------------------
+TEST        ?= 3.1-aes_encryption
+IMPL        ?= cpu
+SIZE        ?= 128
+NUM_THREADS ?= 2
+NUM_CORES   ?= 2
+OS          ?= rtems
+
+obpmark:
+	@if [ "$(origin PLATFORM)" != "command line" ]; then \
+		echo ""; \
+		echo " [ERRORE] Devi specificare la piattaforma target per OBPMark!"; \
+		echo " Uso corretto:"; \
+		echo "   make obpmark PLATFORM=astral [OS=linux]"; \
+		echo "   make obpmark PLATFORM=cheshire"; \
+		echo ""; \
+		exit 1; \
+	fi
+	$(MAKE) -f benchmarks/obpmark.mk \
+		TARGET=$(PLATFORM) \
+		TEST=$(TEST) \
+		IMPL=$(IMPL) \
+		SIZE=$(SIZE) \
+		NUM_THREADS=$(NUM_THREADS) \
+		NUM_CORES=$(NUM_CORES) \
+		OS=$(OS)
+
+
+obpmark-rtems:
+	$(MAKE) obpmark OS=rtems
+
+obpmark-linux:
+	$(MAKE) obpmark OS=linux
 
 # ============================================================
-# FPGA setup
+# FPGA Commands (for bringup-bench)
 # ============================================================
-FPGA_SCRIPTS_DIR ?= $(HOME)/fseratini/riscv_fpga_scripts
-USB_SERIAL       ?= 200300BB8B7BB
-DEVICE           ?= xc7k325t_0
-BITSTREAM        ?= $(HOME)/fseratini/bit_under_test/cheshire.genesys2
-OPENOCD_SCRIPT   ?= $(FPGA_SCRIPTS_DIR)/scripts_openocd/openocd.genesys2.noshutdown.tcl
-VIVADO_PORT      ?= 3334
-GDB_PORT         ?= 3333
-UART_DEV         ?= /dev/ttyUSB0
-TEST_TIMEOUT     ?= 20
-TESTNAME        ?=
+-include $(ROOT)/target/$(PLATFORM)/ports/bringup-bench/fpga.mk
 
-FPGA_ENV := FPGA_SCRIPTS=$(FPGA_SCRIPTS_DIR) \
-            USB_SERIAL=$(USB_SERIAL) \
-            DEVICE=$(DEVICE) \
-            PROJECT_NAME=$(BITSTREAM) \
-            OPENOCD_SCRIPT=$(OPENOCD_SCRIPT) \
-            VIVADO_PORT=$(VIVADO_PORT) \
-            GDB_PORT=$(GDB_PORT) \
-            UART_DEV=$(UART_DEV) \
-            TEST_TIMEOUT=$(TEST_TIMEOUT)
+# ============================================================
+# Clean 
+# ============================================================
+.PHONY: clean clean-rtems distclean-rtems
 
-.PHONY: fpga-setup fpga-run-all fpga-run-one
+.PHONY: clean
+clean:
+	@if [ "$(BENCHMARK)" = "obpmark" ]; then \
+		$(MAKE) -f benchmarks/obpmark.mk clean; \
+	else \
+		rm -rf $(BUILD_DIR); \
+		echo "[CLEAN] Removed $(BUILD_DIR)"; \
+	fi
+	
+clean-rtems:
+	$(MAKE) -f $(ROOT)/benchmarks/rtems-bsp.mk \
+		PLATFORM=$(PLATFORM) \
+		RTEMS_TOOLS=$(RTEMS_TOOLCHAIN_INSTALL_DIR) \
+		BSP_DIR=$(RTEMS_PORTS_DIR) \
+		clean
 
-fpga-setup:
-	$(FPGA_ENV) bash scripts/bringup-bench-scripts/setup_and_run.sh
+distclean-rtems:
+	$(MAKE) -f $(ROOT)/benchmarks/rtems-bsp.mk \
+		PLATFORM=$(PLATFORM) \
+		RTEMS_TOOLS=$(RTEMS_TOOLCHAIN_INSTALL_DIR) \
+		BSP_DIR=$(RTEMS_PORTS_DIR) \
+		distclean
 
-fpga-run-all:
-	$(FPGA_ENV) bash scripts/bringup-bench-scripts/run_all_tests.sh
-
-fpga-run-one:
-	$(FPGA_ENV) bash scripts/bringup-bench-scripts/run_test.sh $(TESTNAME) $(GDB_PORT) $(UART_DEV) $(TEST_TIMEOUT)
+.PHONY: clean-%
+clean-%:
+	$(MAKE) clean BENCHMARK=$*

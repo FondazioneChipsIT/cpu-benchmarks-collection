@@ -1,0 +1,139 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+
+/*
+ *  COPYRIGHT (c) 1989-2012.
+ *  On-Line Applications Research Corporation (OAR).
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
+#include <rtems.h>
+#include <rtems/bspIo.h>
+//#include <stdio.h>
+
+//#include <tmacros.h>
+
+const char rtems_test_name[] = "HELLO ASTRAL RTEMS";
+
+// static rtems_task Init( rtems_task_argument ignored )
+// {
+//   (void) ignored;
+
+//   rtems_print_printer_fprintf_putc( &rtems_test_printer );
+//   TEST_BEGIN();
+//   printf( "Hello World astral RTEMS!!\n" );
+//   TEST_END();
+//   rtems_test_exit( 0 );
+// }
+
+
+
+// static rtems_task Init(rtems_task_argument ignored)
+// {
+//     (void) ignored;
+    
+//     Heap_Information_block info;                    /* tipo corretto */
+//     rtems_workspace_get_information(&info);         /* dichiarata in rtems/rtems/support.h via rtems.h */
+//     printf("Workspace used:  %zu bytes\n", info.Used.total);
+//     printf("Workspace free:  %zu bytes\n", info.Free.total);
+//     printf( "Hello World astral RTEMS!!\n" );
+
+//     rtems_test_exit(0);
+// }
+
+/* fuori da Init, a livello di file */
+// extern char __bss_start[];
+// extern char _end[];
+
+// static rtems_task Init(rtems_task_argument ignored)
+// {
+//     (void) ignored;
+
+//     Heap_Information_block info;
+//     rtems_workspace_get_information(&info);
+
+//     volatile char sp_probe;
+
+//     printk("Workspace used:  %zu B\n", info.Used.total);
+//     printk("Workspace free:  %zu B\n", info.Free.total);
+//     printk("Workspace total: %zu B\n", info.Used.total + info.Free.total);
+//     printk("Stack ptr ~now:  0x%lx\n", (unsigned long)&sp_probe);
+//     printk("Hello RTEMS Astral!\n");
+
+
+//     //rtems_test_exit(0);
+//     rtems_task_exit(); 
+// }
+
+static rtems_task Init(rtems_task_argument ignored)
+{
+    (void) ignored;
+    // volatile char sp_probe;
+    // printk("Stack: 0x%lx\n", (unsigned long)&sp_probe);
+    printk("Hello RTEMS Astral!\n");
+    rtems_task_exit();
+}
+
+/* Drivers needed */
+//#define CONFIGURE_APPLICATION_NEEDS_CLOCK_DRIVER
+#define CONFIGURE_APPLICATION_DOES_NOT_NEED_CLOCK_DRIVER
+#define CONFIGURE_APPLICATION_NEEDS_CONSOLE_DRIVER
+
+/* Task configuration */
+#define CONFIGURE_ZERO_WORKSPACE_AUTOMATICALLY
+// questo serve per disabilitare il filesystem e ridurre il footprint della RAM
+#define CONFIGURE_APPLICATION_DISABLE_FILESYSTEM
+#define CONFIGURE_MAXIMUM_FILE_DESCRIPTORS 0
+
+#define CONFIGURE_MAXIMUM_TASKS 1
+#define CONFIGURE_RTEMS_INIT_TASKS_TABLE
+
+//#define CONFIGURE_INIT_TASK_ATTRIBUTES RTEMS_FLOATING_POINT
+#define CONFIGURE_INIT_TASK_ATTRIBUTES RTEMS_DEFAULT_ATTRIBUTES
+#define CONFIGURE_DISABLE_NEWLIB_REENTRANCY
+//#define CONFIGURE_INITIAL_EXTENSIONS RTEMS_TEST_INITIAL_EXTENSION
+#define CONFIGURE_INIT_TASK_STACK_SIZE  (512U)  // minimo assoluto
+/* ---- Riduzione footprint RAM ---- */
+
+//era 10
+#define CONFIGURE_EXECUTIVE_RAM_SIZE      (4 * 1024U)   /* 10 KB — misurato */
+
+//erano 2
+#define CONFIGURE_MINIMUM_TASK_STACK_SIZE 512  /* 2 KB per task */
+#define CONFIGURE_IDLE_TASK_STACK_SIZE      (1 * 1024U)    /* 2 KB idle */
+
+// era 4
+#define CONFIGURE_INTERRUPT_STACK_SIZE      (2 * 1024U)    /* 4 KB ISR stack */
+
+//added to reduce footprint RAM 
+#define CONFIGURE_MAXIMUM_PRIORITY 7
+
+//SMP = FALSE to reduce footprint RAM
+
+#define CONFIGURE_INIT
+#include <rtems/confdefs.h>
+
+

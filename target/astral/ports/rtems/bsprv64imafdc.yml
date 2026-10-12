@@ -17,5 +17,13 @@ links:
   uid: ../../opto2
 - role: build-dependency
   uid: grp
+- role: build-dependency
+  uid: ../../riscv/optworkbegin
+- role: build-dependency
+  uid: ../../riscv/optworksize
+- role: build-dependency
+  uid: ../../riscv/optL2begin
+- role: build-dependency
+  uid: ../../riscv/optL2size 
 source: []
 type: build

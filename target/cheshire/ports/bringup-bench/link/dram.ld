@@ -1,1 +1,1 @@
-/home/fseratini/fseratini/cheshire/sw/link/dram.ld
+/data2/fseratini/cheshirepulito/sw/link/dram.ld

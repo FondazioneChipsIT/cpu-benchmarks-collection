@@ -25,7 +25,7 @@ default:
 - enabled-by: riscv/rv64imafdc
   value: 0x10000000
 - enabled-by: true
-  value: 0x80000000
+  value: 0x10000000
 description: ''
 enabled-by: true
 format: '{:#010x}'

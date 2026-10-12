@@ -173,7 +173,7 @@ build-all:
 # OBPMark
 # Usage:
 #   make obpmark PLATFORM=cheshire
-#   make obpmark PLATFORM=astral TEST=1.1-image_calibration IMPL=openmp
+#   make obpmark PLATFORM=astral TEST=1.1-image IMPL=openmp
 #   make obpmark-rtems PLATFORM=cheshire
 #   make obpmark-linux PLATFORM=astral
 # ------------------------------------------------------------
@@ -183,6 +183,7 @@ SIZE        ?= 128
 NUM_THREADS ?= 2
 NUM_CORES   ?= 2
 OS          ?= rtems
+USE_ROOTFS_TAR ?= no
 
 obpmark:
 	@if [ "$(origin PLATFORM)" != "command line" ]; then \
@@ -201,7 +202,8 @@ obpmark:
 		SIZE=$(SIZE) \
 		NUM_THREADS=$(NUM_THREADS) \
 		NUM_CORES=$(NUM_CORES) \
-		OS=$(OS)
+		OS=$(OS) \
+		USE_ROOTFS_TAR=$(USE_ROOTFS_TAR) 
 
 
 obpmark-rtems:

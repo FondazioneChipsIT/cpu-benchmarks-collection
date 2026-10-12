@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: SHL-0.51
 //
 // Cyril Koenig <cykoenig@iis.ee.ethz.ch>
+//
+// Adattato a dual-core (CPU0 + CPU1) sul modello di cheshire dual-core.
 
 /dts-v1/;
 / {
@@ -18,20 +20,32 @@
   chosen {
     stdout-path = "/soc/serial@3002000";
   };
+
   memory@10000000 {
     device_type = "memory";
     reg = <0x0 0x10000000 0x0 0x00020000>;
+};
+
+  memory@78000000 {
+    device_type = "memory";
+    reg = <0x0 0x78000000 0x0 0x00010000>;
   };
+
+  memory@50000000 {
+    device_type = "memory";
+    reg = <0x0 0x50000000 0x0 0x00010000>;
+};
+
+
   cpus {
     #address-cells = <1>;
     #size-cells = <0>;
-    timebase-frequency = <32768>; // 1 MHz -> adapted to RTEMS
-    
+    timebase-frequency = <1000000>; // 1 MHz (1000000) -> adapted to RTEMS (32768)
     CPU0: cpu@0 {
       device_type = "cpu";
       status = "okay";
       compatible = "eth,ariane", "riscv";
-      clock-frequency = <50000000>; // 50 MHz -> 200
+      clock-frequency = <600000000>; // 50 MHz -> 200
       riscv,isa = "rv64imafdc";
       mmu-type = "riscv,sv39";
       tlb-split;
@@ -43,11 +57,28 @@
         compatible = "riscv,cpu-intc";
       };
     };
+
+    CPU1: cpu@1 {
+      device_type = "cpu";
+      status = "okay";
+      compatible = "eth,ariane", "riscv";
+      clock-frequency = <600000000>; // 50 MHz
+      riscv,isa = "rv64imafdc";
+      mmu-type = "riscv,sv39";
+      tlb-split;
+      reg = <1>;
+      CPU1_intc: interrupt-controller {
+        #address-cells = <0>;
+        #interrupt-cells = <1>;
+        interrupt-controller;
+        compatible = "riscv,cpu-intc";
+      };
+    };
   };
   sysclk: virt_50mhz {
     #clock-cells = <0>;
     compatible = "fixed-clock";
-    clock-frequency = <50000000>;
+    clock-frequency = <600000000>;
   };
   soc: soc {
     #address-cells = <2>;
@@ -73,8 +104,8 @@
     };
     uart0: serial@3002000 {
       compatible = "ns16550a";
-      clock-frequency = <50000000>; //50 mgz
-      current-speed = <115200>; 
+      clock-frequency = <600000000>; //50 mgz
+      current-speed = <115200>;
       interrupt-parent = <&PLIC0>;
       interrupts = <1>;
       reg = <0x0 0x3002000 0x0 0x1000>;
@@ -86,7 +117,7 @@
       interrupt-parent = <&PLIC0>;
       interrupts = <17 18>;
       reg = <0x0 0x3004000 0x0 0x1000>;
-      clock-frequency = <50000000>;
+      clock-frequency = <600000000>;
       max-frequency = <20000000>;
       #address-cells = <1>;
       #size-cells = <0>;
@@ -110,7 +141,7 @@
     };
     clint@2040000 {
       compatible = "riscv,clint0";
-      interrupts-extended = <&CPU0_intc 3 &CPU0_intc 7>;
+      interrupts-extended = <&CPU0_intc 3 &CPU0_intc 7 &CPU1_intc 3 &CPU1_intc 7>;
       reg-names = "control";
       reg = <0x0 0x2040000 0x0 0x040000>;
     };
@@ -119,7 +150,7 @@
       #address-cells = <0>;
       #interrupt-cells = <1>;
       interrupt-controller;
-      interrupts-extended = <&CPU0_intc 11 &CPU0_intc 9>;
+      interrupts-extended = <&CPU0_intc 11 &CPU0_intc 9 &CPU1_intc 11 &CPU1_intc 9>;
       riscv,max-priority = <7>;
       riscv,ndev = <51>;
       reg = <0x0 0x4000000 0x0 0x4000000>;

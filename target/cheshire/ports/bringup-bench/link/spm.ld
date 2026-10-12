@@ -1,1 +1,1 @@
-/home/fseratini/fseratini/cheshire/sw/link/spm.ld
+/data2/fseratini/cheshirepulito/sw/link/spm.ld

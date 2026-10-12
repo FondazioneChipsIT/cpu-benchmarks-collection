@@ -1,0 +1,116 @@
+SPDX-License-Identifier: CC-BY-SA-4.0 OR BSD-2-Clause
+build-type: config-file
+content: |
+  /*
+   * Astral memory map as seen by CVA6 (see carfield_pkg.sv / cheshire_pkg.sv):
+   *
+   *   RAM (SPM) 0x10000000  exec, cached (LLC), atomics  -> code, .data/.bss
+   *   L2        0x78000000  exec, cached (CIE), atomics  -> stacks, objects,
+   *                                                         workspace, heap
+   *   L1        0x50000000  NOT exec, uncached, NO atomics (axi2mem drops
+   *                         ATOPs)                       -> .rodata, heap
+   *
+   * Anything accessed with AMO/LR-SC (SMP spinlocks, per-CPU data, thread
+   * queues, C11 atomics in mini_gomp) must NOT be placed in L1, otherwise the
+   * core hangs waiting for the atomic response.  Only read-only data and plain
+   * malloc() buffers go to L1; bspgetworkarea.c extends the malloc heap (never
+   * the RTEMS workspace) with the free part of L1.
+   *
+   * Note: RISCV_WORK_REGION_* is the L1 window, it is not REGION_WORK.
+   */
+  MEMORY {
+    RAM : ORIGIN = ${RISCV_RAM_REGION_BEGIN}, LENGTH = ${RISCV_RAM_REGION_SIZE}
+    L2  : ORIGIN = ${RISCV_L2_REGION_BEGIN}, LENGTH = ${RISCV_L2_REGION_SIZE}
+    L1  : ORIGIN = ${RISCV_WORK_REGION_BEGIN}, LENGTH = ${RISCV_WORK_REGION_SIZE}
+  }
+
+  REGION_ALIAS ("REGION_START",          RAM);
+  REGION_ALIAS ("REGION_START_LOAD",     RAM);
+  REGION_ALIAS ("REGION_TEXT",           RAM);
+  REGION_ALIAS ("REGION_TEXT_LOAD",      RAM);
+  REGION_ALIAS ("REGION_FAST_TEXT",      RAM);
+  REGION_ALIAS ("REGION_FAST_TEXT_LOAD", RAM);
+  REGION_ALIAS ("REGION_RODATA",         L1);
+  REGION_ALIAS ("REGION_RODATA_LOAD",    L1);
+  REGION_ALIAS ("REGION_DATA",           RAM);
+  REGION_ALIAS ("REGION_DATA_LOAD",      RAM);
+  REGION_ALIAS ("REGION_FAST_DATA",      RAM);
+  REGION_ALIAS ("REGION_FAST_DATA_LOAD", RAM);
+  REGION_ALIAS ("REGION_BSS",            RAM);
+  REGION_ALIAS ("REGION_RTEMSSTACK",     L2);
+  REGION_ALIAS ("REGION_WORK",           L2);
+
+  INCLUDE linkcmds.base
+
+  /* Free part of L1 after .rodata: malloc-only heap extension */
+  L1HeapBegin = ALIGN (bsp_section_rodata_end, 64);
+  L1HeapEnd   = ORIGIN (L1) + LENGTH (L1);
+copyrights:
+- Copyright (C) 2020 embedded brains GmbH & Co. KG
+enabled-by: true
+install-path: ${BSP_LIBDIR}
+links:
+- role: build-dependency
+  uid: optworkbegin
+- role: build-dependency
+  uid: optworksize
+- role: build-dependency
+  uid: optL2begin
+- role: build-dependency
+  uid: optL2size
+
+target: linkcmds
+type: build
+
+
+# SPDX-License-Identifier: CC-BY-SA-4.0 OR BSD-2-Clause
+# build-type: config-file
+# content: |
+#   MEMORY {
+#     RAM : ORIGIN = ${RISCV_RAM_REGION_BEGIN}, LENGTH = ${RISCV_RAM_REGION_SIZE}
+#     L2  : ORIGIN = ${RISCV_L2_REGION_BEGIN}, LENGTH = ${RISCV_L2_REGION_SIZE}
+#     L1  : ORIGIN = ${RISCV_WORK_REGION_BEGIN}, LENGTH = ${RISCV_WORK_REGION_SIZE}
+
+#   }
+
+#   REGION_ALIAS ("REGION_START",          RAM);
+#   REGION_ALIAS ("REGION_START_LOAD",     RAM);
+#   REGION_ALIAS ("REGION_TEXT",           RAM);
+#   REGION_ALIAS ("REGION_TEXT_LOAD",      RAM);
+#   REGION_ALIAS ("REGION_FAST_TEXT",      RAM);
+#   REGION_ALIAS ("REGION_FAST_TEXT_LOAD", RAM);
+#   REGION_ALIAS ("REGION_RODATA",         L1);
+#   REGION_ALIAS ("REGION_RODATA_LOAD",    L1);
+#   REGION_ALIAS ("REGION_DATA",           L1);
+#   REGION_ALIAS ("REGION_DATA_LOAD",      L1);
+#   REGION_ALIAS ("REGION_FAST_DATA",      L1);
+#   REGION_ALIAS ("REGION_FAST_DATA_LOAD", L1);
+#   REGION_ALIAS ("REGION_BSS",            L1);
+#   REGION_ALIAS ("REGION_RTEMSSTACK",     L1);
+#   REGION_ALIAS ("REGION_WORK",           L1);
+
+#   INCLUDE linkcmds.base
+
+#   /* Il linker mette WorkAreaBase dopo BSS/stack in L1;
+#      L1End è la fine dell'area L1 */
+  
+#   PROVIDE (L2End  = ORIGIN(L2) + LENGTH(L2));
+#   PROVIDE (L1Base = 0x50000000);
+#   PROVIDE (L1End  = 0x50020000);
+
+# copyrights:
+# - Copyright (C) 2020 embedded brains GmbH & Co. KG
+# enabled-by: true
+# install-path: ${BSP_LIBDIR}
+# links:
+# - role: build-dependency
+#   uid: optworkbegin
+# - role: build-dependency
+#   uid: optworksize
+# - role: build-dependency
+#   uid: optL2begin
+# - role: build-dependency
+#   uid: optL2size
+
+# target: linkcmds
+# type: build

@@ -41,6 +41,8 @@ links:
 - role: build-dependency
   uid: test_fetch_enable
 - role: build-dependency
+  uid: optmagiaelfpath
+- role: build-dependency
   uid: test_elf_loader
 - role: build-dependency
   uid: unlimited

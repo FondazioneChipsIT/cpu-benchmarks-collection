@@ -11,6 +11,13 @@ RTEMS_TOOLS      ?= $(ROOT)/target/cheshire/ports/rtems/toolchain/compiler-stric
 PREFIX           ?= $(BSP_DIR)/install
 RTEMS_BSP        := riscv/rv64imafdc
 
+# MAGIA ELF embedded by the test_elf_loader sample (RTEMS option MAGIA_ELF_PATH),
+# e.g. make rtems MAGIA_ELF=~/magia-sdk/build/bin/test_uma_sync
+MAGIA_ELF        ?= $(HOME)/magia-sdk/build/bin/test_uma_sync
+# Absolute path (waf runs in RTEMS_DIR): relative paths are resolved against the
+# make working directory, a leading '~/' against $(HOME); empty stays empty
+MAGIA_ELF_ABS    := $(if $(strip $(MAGIA_ELF)),$(abspath $(patsubst ~/%,$(HOME)/%,$(strip $(MAGIA_ELF)))))
+
 DTC              := dtc
 PYTHON           := python3
 
@@ -73,6 +80,7 @@ gen-config-ini:
 	@echo "BUILD_SAMPLES = True" >> $(CONFIG_INI)
 	@echo "RTEMS_DEBUG = False" >> $(CONFIG_INI)
 	@echo "LDFLAGS = -Wl,--gc-sections" >> $(CONFIG_INI)
+	@echo "MAGIA_ELF_PATH = $(MAGIA_ELF_ABS)" >> $(CONFIG_INI)
 	@echo "[CONFIG] Written $(CONFIG_INI) with RTEMS_SMP = $(RTEMS_SMP_VAL)"
 ifeq ($(DTS_BASENAME),astral)
 	@echo "RISCV_RAM_REGION_BEGIN = 0x10000000" >> $(CONFIG_INI)
@@ -139,6 +147,8 @@ ifneq ($(wildcard $(BSP_DIR)/test_fetch_enable),)
 		$(RTEMS_DIR)/testsuites/samples/test_elf_loader/magia_elf.c
 	install -Dm644 $(BSP_DIR)/test_elf_loader/test_elf_loader.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/test_elf_loader.yml
+	install -Dm644 $(BSP_DIR)/test_elf_loader/optmagiaelfpath.yml \
+		$(RTEMS_DIR)/spec/build/testsuites/samples/optmagiaelfpath.yml
 	@echo "[BSP] Installing samples group (test_fetch_enable and test_elf_loader)..."
 	install -Dm644 $(BSP_DIR)/test_fetch_enable/grp.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/grp.yml

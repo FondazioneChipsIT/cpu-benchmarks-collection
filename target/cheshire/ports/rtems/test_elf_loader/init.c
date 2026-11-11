@@ -281,6 +281,11 @@ static void load_elf_from_memory(const uint8_t *file_base,
                                  size_t file_size,
                                  elf_info_t *info)
 {
+    if (file_size == 0) {
+        rtems_panic("No MAGIA ELF embedded: rebuild with MAGIA_ELF_PATH set "
+                    "(make rtems MAGIA_ELF=/path/to/elf)");
+    }
+
     if (file_size < EI_NIDENT) {
         rtems_panic("ELF image too small");
     }

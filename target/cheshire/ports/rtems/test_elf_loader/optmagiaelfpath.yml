@@ -1,0 +1,33 @@
+SPDX-License-Identifier: CC-BY-SA-4.0 OR BSD-2-Clause
+actions:
+- get-string: null
+- script: |
+    import hashlib
+    import os
+    if value:
+        value = os.path.abspath(os.path.expanduser(value))
+        if not os.path.isfile(value):
+            conf.fatal("MAGIA_ELF_PATH: file not found: " + value)
+        with open(value, "rb") as f:
+            digest = hashlib.sha1(f.read()).hexdigest()
+        self._do_append_test_cppflags(
+            conf, "test_elf_loader", "-DMAGIA_ELF_PATH=" + value)
+        # The ELF is embedded with .incbin, which waf does not track: its hash
+        # in the flags rebuilds magia_elf.c whenever the ELF content changes.
+        self._do_append_test_cppflags(
+            conf, "test_elf_loader", "-DMAGIA_ELF_SHA1=" + digest)
+- env-assign: null
+build-type: option
+copyrights:
+- Copyright (C) 2026 Chips-IT
+default:
+- enabled-by: true
+  value: ''
+description: |
+  Path of the MAGIA ELF embedded by the test_elf_loader sample (.incbin).  If
+  empty, test_elf_loader is built with an empty image and panics at run time.
+enabled-by: true
+format: '{}'
+links: []
+name: MAGIA_ELF_PATH
+type: build

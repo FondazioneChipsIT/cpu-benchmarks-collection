@@ -3,8 +3,7 @@ build-type: test-program
 cflags: []
 copyrights:
 - Copyright (C) 2026 Chips-IT
-cppflags:
-- -DMAGIA_ELF_PATH=/home/riccardorepetto/magia-sdk/build/bin/test_uma_sync
+cppflags: []
 cxxflags: []
 enabled-by: true
 features: c cprogram

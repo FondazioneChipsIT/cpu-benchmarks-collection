@@ -23,17 +23,33 @@ endif
 DTS_SRC         := $(BSP_DIR)/$(DTS_BASENAME).dts
 DTB_OUT         := $(BSP_DIR)/$(DTS_BASENAME).dtb
 DTB_HEADER      := $(BSP_DIR)/$(DTS_BASENAME)-dtb.h
+
+CPU_FREQ_HZ ?= 600000000
+DTS_GEN     := $(BSP_DIR)/$(DTS_BASENAME).gen.dts
+FREQ_STAMP  := $(BSP_DIR)/.cpu_freq_$(CPU_FREQ_HZ)
+
 GEN_SCRIPT      := $(BSP_DIR)/gen_dtb_header.py
 GEN_SCRIPT       := $(BSP_DIR)/gen_dtb_header.py
 
 .DEFAULT_GOAL := all
 
+
+$(FREQ_STAMP):
+	rm -f $(BSP_DIR)/.cpu_freq_*
+	touch $@
+
+$(DTS_GEN): $(DTS_SRC) $(FREQ_STAMP)
+	sed 's/CPU_FREQ_HZ/$(CPU_FREQ_HZ)/g' $< > $@
+
+$(DTB_OUT): $(DTS_GEN)
+	@echo "[DTB] Compiling DTS -> DTB (CPU_FREQ_HZ=$(CPU_FREQ_HZ))"
+	$(DTC) -I dts -O dtb -o $@ $<
 # ============================================================
 # DTB & header generation
 # ============================================================
-$(DTB_OUT): $(DTS_SRC)
-	@echo "[DTB] Compiling DTS -> DTB"
-	$(DTC) -I dts -O dtb -o $@ $<
+# $(DTB_OUT): $(DTS_SRC)
+# 	@echo "[DTB] Compiling DTS -> DTB"
+# 	$(DTC) -I dts -O dtb -o $@ $<
 
 $(DTB_HEADER): $(DTB_OUT) $(GEN_SCRIPT)
 	@echo "[DTB] Generating C header from DTB"
@@ -54,16 +70,19 @@ gen-config-ini:
 	@echo "[$(RTEMS_BSP)]" > $(CONFIG_INI)
 	@echo "RTEMS_SMP = $(RTEMS_SMP_VAL)" >> $(CONFIG_INI)
 	@echo "BUILD_TESTS = False" >> $(CONFIG_INI)
-	@echo "BUILD_SAMPLES = False" >> $(CONFIG_INI)
+	@echo "BUILD_SAMPLES = True" >> $(CONFIG_INI)
 	@echo "RTEMS_DEBUG = False" >> $(CONFIG_INI)
 	@echo "LDFLAGS = -Wl,--gc-sections" >> $(CONFIG_INI)
 	@echo "[CONFIG] Written $(CONFIG_INI) with RTEMS_SMP = $(RTEMS_SMP_VAL)"
+ifeq ($(DTS_BASENAME),astral)
 	@echo "RISCV_RAM_REGION_BEGIN = 0x10000000" >> $(CONFIG_INI)
 	@echo "RISCV_RAM_REGION_SIZE = 0x00020000" >> $(CONFIG_INI)
 	@echo "RISCV_L2_REGION_BEGIN = 0x78000000" >> $(CONFIG_INI)
-	@echo "RISCV_L2_REGION_SIZE = 0x00010000" >> $(CONFIG_INI)	
+	@echo "RISCV_L2_REGION_SIZE = 0x00010000" >> $(CONFIG_INI)
 	@echo "RISCV_WORK_REGION_BEGIN = 0x50000000" >> $(CONFIG_INI)
-	@echo "RISCV_WORK_REGION_SIZE = 0x00020000" >> $(CONFIG_INI)	
+	@echo "RISCV_WORK_REGION_SIZE = 0x00020000" >> $(CONFIG_INI)
+endif
+	
 
 # ============================================================
 # Patch RTEMS
@@ -87,26 +106,27 @@ patch: $(DTB_HEADER)
 		$(RTEMS_DIR)/spec/build/bsps/riscv/optrambegin.yml
 	install -Dm644 $(BSP_DIR)/bsprv64imafdc.yml \
 		$(RTEMS_DIR)/spec/build/bsps/riscv/riscv/bsprv64imafdc.yml
-	install -Dm644 $(BSP_DIR)/abi.yml \
-		$(RTEMS_DIR)/spec/build/bsps/riscv/riscv/abi.yml
 	#install -Dm644 $(BSP_DIR)/opthtif.yml \
 	#		$(RTEMS_DIR)/spec/build/bsps/riscv/riscv/opthtif.yml
 	install -Dm644 $(BSP_DIR)/start.S \
 		$(RTEMS_DIR)/bsps/riscv/shared/start/start.S
 	install -Dm644 $(BSP_DIR)/init.c \
- 		$(RTEMS_DIR)/testsuites/samples/hello/init.c
-	install -Dm644 $(BSP_DIR)/linkcmds.yml \
- 		$(RTEMS_DIR)/spec/build/bsps/riscv/linkcmds.yml
-	install -Dm644 $(BSP_DIR)/optworkbegin.yml \
- 		$(RTEMS_DIR)/spec/build/bsps/riscv/optworkbegin.yml
-	install -Dm644 $(BSP_DIR)/optworksize.yml \
- 		$(RTEMS_DIR)/spec/build/bsps/riscv/optworksize.yml
-	install -Dm644 $(BSP_DIR)/optL2begin.yml \
- 		$(RTEMS_DIR)/spec/build/bsps/riscv/optL2begin.yml
-	install -Dm644 $(BSP_DIR)/optL2size.yml \
- 		$(RTEMS_DIR)/spec/build/bsps/riscv/optL2size.yml
-	install -Dm644 $(BSP_DIR)/bspgetworkarea.c \
- 		$(RTEMS_DIR)/bsps/riscv/shared/start/bspgetworkarea.c
+		$(RTEMS_DIR)/testsuites/samples/hello/init.c
+	[ -f $(BSP_DIR)/abi.yml ] && install -Dm644 $(BSP_DIR)/abi.yml \
+		$(RTEMS_DIR)/spec/build/bsps/riscv/riscv/abi.yml || true
+	[ -f $(BSP_DIR)/linkcmds.yml ] && install -Dm644 $(BSP_DIR)/linkcmds.yml \
+		$(RTEMS_DIR)/spec/build/bsps/riscv/linkcmds.yml || true
+	[ -f $(BSP_DIR)/optworkbegin.yml ] && install -Dm644 $(BSP_DIR)/optworkbegin.yml \
+		$(RTEMS_DIR)/spec/build/bsps/riscv/optworkbegin.yml || true
+	[ -f $(BSP_DIR)/optworksize.yml ] && install -Dm644 $(BSP_DIR)/optworksize.yml \
+		$(RTEMS_DIR)/spec/build/bsps/riscv/optworksize.yml || true
+	[ -f $(BSP_DIR)/optL2begin.yml ] && install -Dm644 $(BSP_DIR)/optL2begin.yml \
+		$(RTEMS_DIR)/spec/build/bsps/riscv/optL2begin.yml || true
+	[ -f $(BSP_DIR)/optL2size.yml ] && install -Dm644 $(BSP_DIR)/optL2size.yml \
+		$(RTEMS_DIR)/spec/build/bsps/riscv/optL2size.yml || true
+	[ -f $(BSP_DIR)/bspgetworkarea.c ] && install -Dm644 $(BSP_DIR)/bspgetworkarea.c \
+		$(RTEMS_DIR)/bsps/riscv/shared/start/bspgetworkarea.c || true
+ifneq ($(wildcard $(BSP_DIR)/test_fetch_enable),)
 	@echo "[BSP] Copying test_fetch_enable sample into RTEMS..."
 	install -Dm644 $(BSP_DIR)/test_fetch_enable/init.c \
 		$(RTEMS_DIR)/testsuites/samples/test_fetch_enable/init.c
@@ -115,6 +135,7 @@ patch: $(DTB_HEADER)
 	@echo "[BSP] Installing samples group (test_fetch_enable)..."
 	install -Dm644 $(BSP_DIR)/test_fetch_enable/grp.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/grp.yml
+endif
 
 # ============================================================
 # Configure — run waf configure (depends on patch + config.ini)
@@ -151,7 +172,7 @@ all: install
 # ============================================================
 .PHONY: clean
 clean:
-	rm -f $(DTB_OUT) $(DTB_HEADER)
+	rm -f $(DTB_OUT) $(DTB_HEADER) $(DTS_GEN) $(BSP_DIR)/.cpu_freq_*
 	rm -rf $(PREFIX)
 
 .PHONY: distclean

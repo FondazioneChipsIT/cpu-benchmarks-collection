@@ -1,0 +1,21 @@
+SPDX-License-Identifier: CC-BY-SA-4.0 OR BSD-2-Clause
+build-type: test-program
+cflags: []
+copyrights:
+- Copyright (C) 2026 Chips-IT
+cppflags:
+- -DMAGIA_ELF_PATH=/home/riccardorepetto/magia-sdk/build/bin/test_uma_sync
+cxxflags: []
+enabled-by: true
+features: c cprogram
+includes: []
+ldflags: []
+links: []
+source:
+- testsuites/samples/test_elf_loader/init.c
+- testsuites/samples/test_elf_loader/magia_elf.c
+stlib: []
+target: testsuites/samples/test_elf_loader.exe
+type: build
+use-after: []
+use-before: []

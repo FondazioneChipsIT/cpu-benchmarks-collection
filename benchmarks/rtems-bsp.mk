@@ -132,7 +132,14 @@ ifneq ($(wildcard $(BSP_DIR)/test_fetch_enable),)
 		$(RTEMS_DIR)/testsuites/samples/test_fetch_enable/init.c
 	install -Dm644 $(BSP_DIR)/test_fetch_enable/test_fetch_enable.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/test_fetch_enable.yml
-	@echo "[BSP] Installing samples group (test_fetch_enable)..."
+	@echo "[BSP] Copying test_elf_loader sample into RTEMS..."
+	install -Dm644 $(BSP_DIR)/test_elf_loader/init.c \
+		$(RTEMS_DIR)/testsuites/samples/test_elf_loader/init.c
+	install -Dm644 $(BSP_DIR)/test_elf_loader/magia_elf.c \
+		$(RTEMS_DIR)/testsuites/samples/test_elf_loader/magia_elf.c
+	install -Dm644 $(BSP_DIR)/test_elf_loader/test_elf_loader.yml \
+		$(RTEMS_DIR)/spec/build/testsuites/samples/test_elf_loader.yml
+	@echo "[BSP] Installing samples group (test_fetch_enable and test_elf_loader)..."
 	install -Dm644 $(BSP_DIR)/test_fetch_enable/grp.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/grp.yml
 endif

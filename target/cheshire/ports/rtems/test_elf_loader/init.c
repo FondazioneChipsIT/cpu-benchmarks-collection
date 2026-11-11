@@ -102,6 +102,12 @@ static inline void write_fence( void )
   __asm__ volatile ( "fence rw, w" ::: "memory" );
 }
 
+/* true if [off, off + len) is inside [0, size), without overflow */
+static bool range_ok(uint64_t off, uint64_t len, uint64_t size)
+{
+    return off <= size && len <= size - off;
+}
+
 static void check_elf_ident(const unsigned char *ident)
 {
     if (memcmp(ident, ELFMAG, SELFMAG) != 0) {
@@ -136,7 +142,8 @@ static void load_segment(uint64_t paddr,
         rtems_panic("ELF segment filesz > memsz");
     }
 
-    if (paddr < MAGIA_L2_START || memsz > MAGIA_L2_END - paddr) {
+    if (paddr < MAGIA_L2_START || paddr > MAGIA_L2_END ||
+        memsz > MAGIA_L2_END - paddr) {
         rtems_panic("ELF segment 0x%08" PRIx64 "+0x%" PRIx64
                     " outside the MAGIA L2", paddr, memsz);
     }
@@ -163,7 +170,21 @@ static void load_elf32_segments(const uint8_t *file_base,
     const Elf32_Ehdr *ehdr = (const Elf32_Ehdr *)file_base;
     const Elf32_Phdr *phdrs;
 
-    if (ehdr->e_phoff + ((size_t)ehdr->e_phnum * sizeof(Elf32_Phdr)) > file_size) {
+    if (file_size < sizeof(Elf32_Ehdr)) {
+        rtems_panic("ELF32 header exceeds file size");
+    }
+
+    if (ehdr->e_machine != EM_RISCV) {
+        rtems_panic("ELF32 machine %u is not RISC-V", (unsigned)ehdr->e_machine);
+    }
+
+    if (ehdr->e_phnum > 0 && ehdr->e_phentsize != sizeof(Elf32_Phdr)) {
+        rtems_panic("ELF32 unexpected program header size %u",
+                    (unsigned)ehdr->e_phentsize);
+    }
+
+    if (!range_ok(ehdr->e_phoff,
+                  (uint64_t)ehdr->e_phnum * sizeof(Elf32_Phdr), file_size)) {
         rtems_panic("ELF32 program header table exceeds file size");
     }
 
@@ -178,7 +199,7 @@ static void load_elf32_segments(const uint8_t *file_base,
             continue;
         }
 
-        if ((uint64_t)seg->p_offset + (uint64_t)seg->p_filesz > file_size) {
+        if (!range_ok(seg->p_offset, seg->p_filesz, file_size)) {
             rtems_panic("ELF32 segment %d exceeds file size", i);
         }
 
@@ -204,7 +225,21 @@ static void load_elf64_segments(const uint8_t *file_base,
     const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)file_base;
     const Elf64_Phdr *phdrs;
 
-    if (ehdr->e_phoff + ((size_t)ehdr->e_phnum * sizeof(Elf64_Phdr)) > file_size) {
+    if (file_size < sizeof(Elf64_Ehdr)) {
+        rtems_panic("ELF64 header exceeds file size");
+    }
+
+    if (ehdr->e_machine != EM_RISCV) {
+        rtems_panic("ELF64 machine %u is not RISC-V", (unsigned)ehdr->e_machine);
+    }
+
+    if (ehdr->e_phnum > 0 && ehdr->e_phentsize != sizeof(Elf64_Phdr)) {
+        rtems_panic("ELF64 unexpected program header size %u",
+                    (unsigned)ehdr->e_phentsize);
+    }
+
+    if (!range_ok(ehdr->e_phoff,
+                  (uint64_t)ehdr->e_phnum * sizeof(Elf64_Phdr), file_size)) {
         rtems_panic("ELF64 program header table exceeds file size");
     }
 
@@ -219,7 +254,7 @@ static void load_elf64_segments(const uint8_t *file_base,
             continue;
         }
 
-        if (seg->p_offset + seg->p_filesz > file_size) {
+        if (!range_ok(seg->p_offset, seg->p_filesz, file_size)) {
             rtems_panic("ELF64 segment %d exceeds file size", i);
         }
 

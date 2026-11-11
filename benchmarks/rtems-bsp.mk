@@ -58,12 +58,24 @@ patch: $(DTB_HEADER)
 		$(RTEMS_DIR)/spec/build/bsps/optfdtuboot.yml
 	install -Dm644 $(BSP_DIR)/optramsize.yml \
 		$(RTEMS_DIR)/spec/build/bsps/riscv/optramsize.yml
+	install -Dm644 $(BSP_DIR)/optrambegin.yml \
+		$(RTEMS_DIR)/spec/build/bsps/riscv/optrambegin.yml
 	install -Dm644 $(BSP_DIR)/bsprv64imafdc.yml \
 		$(RTEMS_DIR)/spec/build/bsps/riscv/riscv/bsprv64imafdc.yml
-	install -Dm644 $(BSP_DIR)/opthtif.yml \
-		$(RTEMS_DIR)/spec/build/bsps/riscv/riscv/opthtif.yml
+	install -Dm644 $(BSP_DIR)/abi.yml \
+		$(RTEMS_DIR)/spec/build/bsps/riscv/riscv/abi.yml
+	#install -Dm644 $(BSP_DIR)/opthtif.yml \
+	#		$(RTEMS_DIR)/spec/build/bsps/riscv/riscv/opthtif.yml
 	install -Dm644 $(BSP_DIR)/start.S \
 		$(RTEMS_DIR)/bsps/riscv/shared/start/start.S
+	@echo "[BSP] Copying test_fetch_enable sample into RTEMS..."
+	install -Dm644 $(BSP_DIR)/test_fetch_enable/init.c \
+		$(RTEMS_DIR)/testsuites/samples/test_fetch_enable/init.c
+	install -Dm644 $(BSP_DIR)/test_fetch_enable/test_fetch_enable.yml \
+		$(RTEMS_DIR)/spec/build/testsuites/samples/test_fetch_enable.yml
+	@echo "[BSP] Installing samples group (test_fetch_enable)..."
+	install -Dm644 $(BSP_DIR)/test_fetch_enable/grp.yml \
+		$(RTEMS_DIR)/spec/build/testsuites/samples/grp.yml
 
 # ============================================================
 # Build RTEMS

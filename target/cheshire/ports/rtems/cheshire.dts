@@ -11,9 +11,17 @@
   chosen {
     stdout-path = "/soc/serial@3002000";
   };
-  memory@80000000 {
+  /*
+   * HTIF, used only by bsp_reset() to power off QEMU at test exit
+   * (qemu-system-riscv64 -M cheshire,htif=on). The console stays on the UART
+   * (stdout-path). Not present on Cheshire HW.
+   */
+  htif {
+    compatible = "ucb,htif0";
+  };
+  memory@A0000000 {
     device_type = "memory";
-    reg = <0x0 0x80000000 0x0 0x04000000>;
+    reg = <0x0 0xA0000000 0x0 0x1FFFE000>;
   };
   cpus {
     #address-cells = <1>;

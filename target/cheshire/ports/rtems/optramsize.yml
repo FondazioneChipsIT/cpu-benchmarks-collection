@@ -19,7 +19,7 @@ default:
 - enabled-by: riscv/kendrytek210
   value: 0x00600000
 - enabled-by: riscv/rv64imafdc
-  value: 0x00400000
+  value: 0x1FF00000
 - enabled-by: true
   value: 0x4000000
 description: ''

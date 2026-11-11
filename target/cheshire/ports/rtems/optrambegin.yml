@@ -23,7 +23,7 @@ default:
 - enabled-by: riscv/mpfs64imafdc
   value: 0x1000000000
 - enabled-by: riscv/rv64imafdc
-  value: 0x80000000
+  value: 0xA0000000
 - enabled-by: true
   value: 0x80000000
 description: ''

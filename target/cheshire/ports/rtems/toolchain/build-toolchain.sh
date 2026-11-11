@@ -38,6 +38,7 @@ BSET
 echo "[TOOLCHAIN] Building toolchain (Direct CFG with Target)..."
 cd "$RSB_DIR/source-builder"
 ./sb-set-builder \
+    --jobs=4 \
     --prefix="$PREFIX" \
     --log="${PREFIX}-build.log" \
     7/rtems-riscv-nosis

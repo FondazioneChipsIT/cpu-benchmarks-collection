@@ -1,0 +1,1 @@
+/data2/fseratini/cheshirepulito/sw/link/dram.ld

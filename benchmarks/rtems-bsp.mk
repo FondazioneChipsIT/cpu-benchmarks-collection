@@ -140,6 +140,15 @@ ifneq ($(wildcard $(BSP_DIR)/test_fetch_enable),)
 		$(RTEMS_DIR)/testsuites/samples/test_fetch_enable/init.c
 	install -Dm644 $(BSP_DIR)/test_fetch_enable/test_fetch_enable.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/test_fetch_enable.yml
+	@echo "[BSP] Copying magia_elf_loader static library into RTEMS cpukit..."
+	install -Dm644 $(BSP_DIR)/libmagiaelfloader/magia_elf_loader.c \
+		$(RTEMS_DIR)/cpukit/libmagiaelfloader/magia_elf_loader.c
+	install -Dm644 $(BSP_DIR)/libmagiaelfloader/magia_elf_loader.h \
+		$(RTEMS_DIR)/cpukit/include/rtems/magia_elf_loader.h
+	install -Dm644 $(BSP_DIR)/libmagiaelfloader/libmagiaelfloader.yml \
+		$(RTEMS_DIR)/spec/build/cpukit/libmagiaelfloader.yml
+	install -Dm644 $(BSP_DIR)/libmagiaelfloader/cpukit-grp.yml \
+		$(RTEMS_DIR)/spec/build/cpukit/grp.yml
 	@echo "[BSP] Copying test_elf_loader sample into RTEMS..."
 	install -Dm644 $(BSP_DIR)/test_elf_loader/init.c \
 		$(RTEMS_DIR)/testsuites/samples/test_elf_loader/init.c

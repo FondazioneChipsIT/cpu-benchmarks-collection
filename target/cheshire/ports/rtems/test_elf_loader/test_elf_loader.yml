@@ -16,5 +16,6 @@ source:
 stlib: []
 target: testsuites/samples/test_elf_loader.exe
 type: build
-use-after: []
+use-after:
+- magia_elf_loader
 use-before: []

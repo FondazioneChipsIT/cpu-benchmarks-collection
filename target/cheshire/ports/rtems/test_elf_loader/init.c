@@ -69,18 +69,6 @@ const char rtems_test_name[] = "ELF LOADER";
 #define UMA_EXCHANGE_BUFFER 0xC1000000UL
 #define exchange_buffer ((volatile uint32_t *) UMA_EXCHANGE_BUFFER)
 
-//#define FETCH_ENABLE_BUFFER 0xCCFEFFF8UL
-#define FETCH_ENABLE_BUFFER 0xCCFF0400UL
-#define fetch_enable_buffer ((volatile uint32_t *) FETCH_ENABLE_BUFFER)
-
-/*
- * MAGIA entry point, read by GVSoC when it finds the fetch enable pattern
- * (gvsoc pulp/chips/magia_v2/arch.py, ENTRY_ADDR_START): must be written
- * before the fetch enable word.
- */
-#define MAGIA_ENTRY_BUFFER 0xCCFF0408UL
-#define magia_entry_buffer ((volatile uint32_t *) MAGIA_ENTRY_BUFFER)
-
 /* Exchange buffer layout (32-bit words) */
 #define SYNC_FROM_MAGIA 0   /* written by MAGIA */
 #define SYNC_TO_MAGIA   1   /* written by RTEMS */
@@ -90,7 +78,6 @@ const char rtems_test_name[] = "ELF LOADER";
 #define GUEST_READY     0x5EADBEEFU
 #define MAGIA_TO_GUEST  0x9ABCDEF0U
 #define GUEST_TO_MAGIA  0xAAAAAAAAU
-#define FETCH_ENABLE_PATTERN 0xFFFFFFFF
 
 static inline void write_fence( void )
 {
@@ -112,27 +99,10 @@ static rtems_task Init( rtems_task_argument ignored )
    memset(&elf_info, 0, sizeof(elf_info));
    
    load_elf_from_memory(magia_elf, magia_elf_size, &elf_info);
-   printf("[RTEMS] MAGIA ELF: %zu bytes, entry=0x%08" PRIx64 "\n",
-          magia_elf_size, elf_info.entry);
-  
+   
+   set_entry_point_and_enable_fetch(&elf_info);  
   /**************/
 
-  rtems_print_printer_fprintf_putc( &rtems_test_printer );
-  TEST_BEGIN();
-  if ( elf_info.entry > UINT32_MAX ) {
-    rtems_panic( "MAGIA entry 0x%" PRIx64 " does not fit in 32 bit", elf_info.entry );
-  }
-  magia_entry_buffer[0] = (uint32_t) elf_info.entry;
-  printf( "[RTEMS] MAGIA entry 0x%08" PRIx32 " written at 0x%08lx\n",
-          (uint32_t) elf_info.entry, MAGIA_ENTRY_BUFFER );
-
-  printf( "[RTEMS] enabling Magia fetch\n" );
-  /* the loaded segments and the entry must be visible before the fetch enable */
-  __asm__ volatile ( "fence rw, rw" ::: "memory" );
-  fetch_enable_buffer[0] = FETCH_ENABLE_PATTERN;
-  
-  printf( "[RTEMS] enabled Magia fetch\n" );
-  write_fence();
   exchange_buffer[ SYNC_FROM_MAGIA ] = INVALID_PATTERN;
   exchange_buffer[ SYNC_TO_MAGIA ] = INVALID_PATTERN;
   write_fence();

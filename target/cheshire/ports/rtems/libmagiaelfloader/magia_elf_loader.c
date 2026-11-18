@@ -183,6 +183,11 @@ static void load_elf64_segments(const uint8_t *file_base,
     }
 }
 
+static inline void write_fence( void )
+{
+  __asm__ volatile ( "fence rw, w" ::: "memory" );
+}
+
 void load_elf_from_memory(const uint8_t *file_base,
                           size_t file_size,
                           elf_info_t *info)
@@ -203,4 +208,32 @@ void load_elf_from_memory(const uint8_t *file_base,
     } else {
         load_elf64_segments(file_base, file_size, info);
     }
+    
+    /* make visible the loaded segments */
+    write_fence();
+    
+    printf("[ELF  ] MAGIA ELF: %zu bytes, entry=0x%08" PRIx64 "\n",
+           file_size, info->entry);
+}
+
+void set_entry_point_and_enable_fetch(const elf_info_t *info)
+{
+    if ( info->entry > UINT32_MAX ) {
+        rtems_panic( "MAGIA entry 0x%" PRIx64 " does not fit in 32 bit", info->entry );
+    }
+      
+    magia_entry_buffer[0] = (uint32_t) info->entry;
+    printf( "[FETCH] MAGIA entry 0x%08" PRIx32 " written at 0x%08lx\n",
+            (uint32_t) info->entry, MAGIA_ENTRY_BUFFER );
+            
+    /* make visible entry*/
+    write_fence();
+
+    printf( "[FETCH] enabling Magia fetch\n" );
+
+    fetch_enable_buffer[0] = FETCH_ENABLE_PATTERN;
+      
+    printf( "[FETCH] enabled Magia fetch\n" );
+    write_fence();
+  
 }

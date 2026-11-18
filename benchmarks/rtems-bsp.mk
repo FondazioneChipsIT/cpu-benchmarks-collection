@@ -158,9 +158,26 @@ ifneq ($(wildcard $(BSP_DIR)/test_fetch_enable),)
 		$(RTEMS_DIR)/spec/build/testsuites/samples/test_elf_loader.yml
 	install -Dm644 $(BSP_DIR)/test_elf_loader/optmagiaelfpath.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/optmagiaelfpath.yml
+ifneq ($(wildcard $(BSP_DIR)/test_omp_offload),)
+	@echo "[BSP] Copying test_omp_offload sample into RTEMS..."
+	install -Dm644 $(BSP_DIR)/test_omp_offload/init.c \
+		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/init.c
+	install -Dm644 $(BSP_DIR)/test_omp_offload/magia_elf.c \
+		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/magia_elf.c
+	install -Dm644 $(BSP_DIR)/test_omp_offload/ringbuf.h \
+		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/ringbuf.h
+	install -Dm644 $(BSP_DIR)/test_omp_offload/offload_layout.h \
+		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/offload_layout.h
+	install -Dm644 $(BSP_DIR)/test_omp_offload/test_omp_offload.yml \
+		$(RTEMS_DIR)/spec/build/testsuites/samples/test_omp_offload.yml
+	@echo "[BSP] Installing samples group (test_fetch_enable, test_elf_loader and test_omp_offload)..."
+	install -Dm644 $(BSP_DIR)/test_omp_offload/grp.yml \
+		$(RTEMS_DIR)/spec/build/testsuites/samples/grp.yml
+else
 	@echo "[BSP] Installing samples group (test_fetch_enable and test_elf_loader)..."
 	install -Dm644 $(BSP_DIR)/test_fetch_enable/grp.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/grp.yml
+endif
 endif
 
 # ============================================================

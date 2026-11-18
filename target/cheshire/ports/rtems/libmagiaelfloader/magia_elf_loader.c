@@ -237,3 +237,283 @@ void set_entry_point_and_enable_fetch(const elf_info_t *info)
     write_fence();
   
 }
+/* ------------------------------------------------------------------------ */
+/* Symbol table                                                              */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * Section header fields needed to walk .symtab, independent of the ELF class.
+ * The class was already validated by check_elf_ident().
+ */
+typedef struct {
+    uint32_t type;
+    uint32_t link;
+    uint64_t offset;
+    uint64_t size;
+    uint64_t entsize;
+} shdr_t;
+
+static void check_image(const uint8_t *file_base, size_t file_size)
+{
+    if (file_size < EI_NIDENT) {
+        rtems_panic("ELF image too small");
+    }
+
+    check_elf_ident(file_base);
+}
+
+static uint16_t elf_shnum(const uint8_t *file_base, size_t file_size,
+                          uint64_t *shoff)
+{
+    uint16_t shnum, shentsize;
+    size_t shdr_size;
+
+    if (file_base[EI_CLASS] == ELFCLASS32) {
+        const Elf32_Ehdr *ehdr = (const Elf32_Ehdr *)file_base;
+
+        if (file_size < sizeof(*ehdr)) {
+            rtems_panic("ELF32 header exceeds file size");
+        }
+        *shoff = ehdr->e_shoff;
+        shnum = ehdr->e_shnum;
+        shentsize = ehdr->e_shentsize;
+        shdr_size = sizeof(Elf32_Shdr);
+    } else {
+        const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)file_base;
+
+        if (file_size < sizeof(*ehdr)) {
+            rtems_panic("ELF64 header exceeds file size");
+        }
+        *shoff = ehdr->e_shoff;
+        shnum = ehdr->e_shnum;
+        shentsize = ehdr->e_shentsize;
+        shdr_size = sizeof(Elf64_Shdr);
+    }
+
+    if (shnum == 0) {
+        return 0;
+    }
+
+    if (shentsize != shdr_size) {
+        rtems_panic("ELF unexpected section header size %u", (unsigned)shentsize);
+    }
+
+    if (!range_ok(*shoff, (uint64_t)shnum * shdr_size, file_size)) {
+        rtems_panic("ELF section header table exceeds file size");
+    }
+
+    return shnum;
+}
+
+static void get_shdr(const uint8_t *file_base, uint64_t shoff, unsigned i,
+                     shdr_t *out)
+{
+    if (file_base[EI_CLASS] == ELFCLASS32) {
+        const Elf32_Shdr *sh = (const Elf32_Shdr *)(file_base + shoff) + i;
+
+        out->type = sh->sh_type;
+        out->link = sh->sh_link;
+        out->offset = sh->sh_offset;
+        out->size = sh->sh_size;
+        out->entsize = sh->sh_entsize;
+    } else {
+        const Elf64_Shdr *sh = (const Elf64_Shdr *)(file_base + shoff) + i;
+
+        out->type = sh->sh_type;
+        out->link = sh->sh_link;
+        out->offset = sh->sh_offset;
+        out->size = sh->sh_size;
+        out->entsize = sh->sh_entsize;
+    }
+}
+
+int magia_elf_foreach_symbol(const uint8_t *file_base,
+                             size_t file_size,
+                             magia_elf_sym_visitor_t visit,
+                             void *arg)
+{
+    uint64_t shoff;
+    uint16_t shnum;
+    shdr_t symtab, strtab;
+    unsigned i;
+    bool is_32;
+    size_t sym_size;
+    uint64_t count;
+    const char *strings;
+
+    check_image(file_base, file_size);
+    is_32 = file_base[EI_CLASS] == ELFCLASS32;
+    sym_size = is_32 ? sizeof(Elf32_Sym) : sizeof(Elf64_Sym);
+
+    shnum = elf_shnum(file_base, file_size, &shoff);
+
+    /* Find .symtab, as satisfy_requested_symbols (HERO plugins/hero/rtl.cpp) */
+    for (i = 0; i < shnum; ++i) {
+        get_shdr(file_base, shoff, i, &symtab);
+        if (symtab.type == SHT_SYMTAB) {
+            break;
+        }
+    }
+
+    if (i == shnum) {
+        return -1;
+    }
+
+    if (symtab.entsize != sym_size) {
+        rtems_panic("ELF unexpected symbol size %" PRIu64, symtab.entsize);
+    }
+
+    if (!range_ok(symtab.offset, symtab.size, file_size)) {
+        rtems_panic("ELF .symtab exceeds file size");
+    }
+
+    if (symtab.link == 0 || symtab.link >= shnum) {
+        rtems_panic("ELF .symtab has an invalid string table index %" PRIu32,
+                    symtab.link);
+    }
+
+    get_shdr(file_base, shoff, symtab.link, &strtab);
+
+    if (strtab.type != SHT_STRTAB || strtab.size == 0 ||
+        !range_ok(strtab.offset, strtab.size, file_size)) {
+        rtems_panic("ELF invalid .symtab string table");
+    }
+
+    strings = (const char *)(file_base + strtab.offset);
+
+    if (strings[strtab.size - 1] != '\0') {
+        rtems_panic("ELF string table is not NUL terminated");
+    }
+
+    count = symtab.size / sym_size;
+
+    /* Entry 0 is the reserved null symbol */
+    for (uint64_t n = 1; n < count; ++n) {
+        const uint8_t *p = file_base + symtab.offset + n * sym_size;
+        magia_elf_sym_t sym;
+        uint32_t st_name;
+        unsigned char st_info;
+        int rv;
+
+        if (is_32) {
+            const Elf32_Sym *es = (const Elf32_Sym *)p;
+
+            st_name = es->st_name;
+            st_info = es->st_info;
+            sym.value = es->st_value;
+            sym.size = es->st_size;
+            sym.shndx = es->st_shndx;
+        } else {
+            const Elf64_Sym *es = (const Elf64_Sym *)p;
+
+            st_name = es->st_name;
+            st_info = es->st_info;
+            sym.value = es->st_value;
+            sym.size = es->st_size;
+            sym.shndx = es->st_shndx;
+        }
+
+        if (st_name == 0) {
+            continue;
+        }
+
+        if (st_name >= strtab.size) {
+            rtems_panic("ELF symbol %" PRIu64 " name outside the string table",
+                        n);
+        }
+
+        sym.name = strings + st_name;
+        /* ELF32_ST_* and ELF64_ST_* are the same macros */
+        sym.type = ELF32_ST_TYPE(st_info);
+        sym.bind = ELF32_ST_BIND(st_info);
+
+        rv = (*visit)(&sym, arg);
+        if (rv != 0) {
+            return rv;
+        }
+    }
+
+    return 0;
+}
+
+typedef struct {
+    const char *name;
+    magia_elf_sym_t *sym;
+} find_by_name_t;
+
+static int visit_find_by_name(const magia_elf_sym_t *sym, void *arg)
+{
+    find_by_name_t *ctx = arg;
+
+    if (sym->shndx != SHN_UNDEF && strcmp(sym->name, ctx->name) == 0) {
+        *ctx->sym = *sym;
+        return 1;
+    }
+
+    return 0;
+}
+
+int magia_elf_find_symbol(const uint8_t *file_base,
+                          size_t file_size,
+                          const char *name,
+                          magia_elf_sym_t *sym)
+{
+    find_by_name_t ctx = { name, sym };
+
+    return magia_elf_foreach_symbol(file_base, file_size,
+                                    visit_find_by_name, &ctx) == 1 ? 0 : -1;
+}
+
+typedef struct {
+    const char *suffix;
+    size_t suffix_len;
+    magia_elf_sym_t *sym;
+    unsigned matches;
+} find_kernel_t;
+
+static int visit_find_kernel(const magia_elf_sym_t *sym, void *arg)
+{
+    find_kernel_t *ctx = arg;
+    size_t prefix_len = sizeof(MAGIA_OMP_KERNEL_PREFIX) - 1;
+    size_t len;
+
+    if (sym->type != STT_FUNC || sym->shndx == SHN_UNDEF ||
+        strncmp(sym->name, MAGIA_OMP_KERNEL_PREFIX, prefix_len) != 0) {
+        return 0;
+    }
+
+    len = strlen(sym->name);
+    if (len < prefix_len + ctx->suffix_len ||
+        strcmp(sym->name + len - ctx->suffix_len, ctx->suffix) != 0) {
+        return 0;
+    }
+
+    if (ctx->matches == 0) {
+        *ctx->sym = *sym;
+    } else {
+        printf("[ELF  ] OpenMP kernel suffix \"%s\" is ambiguous: %s, %s\n",
+               ctx->suffix, ctx->sym->name, sym->name);
+    }
+    ++ctx->matches;
+
+    return 0;
+}
+
+int magia_elf_find_omp_kernel(const uint8_t *file_base,
+                              size_t file_size,
+                              const char *suffix,
+                              magia_elf_sym_t *sym)
+{
+    find_kernel_t ctx = { suffix, strlen(suffix), sym, 0 };
+
+    if (magia_elf_foreach_symbol(file_base, file_size,
+                                 visit_find_kernel, &ctx) < 0) {
+        return -1;
+    }
+
+    if (ctx.matches == 0) {
+        return -1;
+    }
+
+    return ctx.matches == 1 ? 0 : -2;
+}

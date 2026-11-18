@@ -1,63 +1,63 @@
 // offload_layout.h
 //
-// "Contratto" tra host e device: indirizzi fissi in L2 e codici dei messaggi.
-// Va incluso sia dal lato host (RTEMS su QEMU) sia dal lato device (omptarget_magia.c).
+// "Contract" between host and device: fixed addresses in L2 and message codes.
+// Must be included both on the host side (RTEMS on QEMU) and on the device side (omptarget_magia.c).
 //
-// In HERO questo ruolo lo hanno:
-//   - i registri LETTER_0/1 della mailbox Carfield  (HERO2/sw/libhero/src/host/carfield/snitch_cluster.h)
-//   - i codici MBOX_*                               (HERO2/sw/libhero/include/libhero/host/hero_api.h)
+// In HERO this role is played by:
+//   - the LETTER_0/1 registers of the Carfield mailbox (HERO2/sw/libhero/src/host/carfield/snitch_cluster.h)
+//   - the MBOX_* codes                                  (HERO2/sw/libhero/include/libhero/host/hero_api.h)
 //
-// Mappa MAGIA v4 (magia-sdk/gvsoc/pulp/pulp/chips/magia_v4/arch.py, magia_v4/link.ld):
-//   L2           0xC000_0000 - 0xFFFF_FFFF (L2_SIZE = 1 GB di default)
-//   codice       0xCC00_0000 (instrram, 32 KB)    <- NON usare
-//   dati/.bss    0xCC01_0000 (dataram)            <- NON usare
-//   TEST_END     0xCCFF_0000                      <- NON usare
-//   stdout       0xFFFF_0004                      <- NON usare
-// Le strutture dell'offload stanno quindi all'inizio della L2.
+// MAGIA v4 memory map (magia-sdk/gvsoc/pulp/pulp/chips/magia_v4/arch.py, magia_v4/link.ld):
+//   L2           0xC000_0000 - 0xFFFF_FFFF (L2_SIZE = 1 GB by default)
+//   code         0xCC00_0000 (instrram, 32 KB)    <- DO NOT use
+//   data/.bss    0xCC01_0000 (dataram)            <- DO NOT use
+//   TEST_END     0xCCFF_0000                      <- DO NOT use
+//   stdout       0xFFFF_0004                      <- DO NOT use
+// The offload structures are therefore placed at the beginning of the L2.
 //
-// Riccardo: questo file e' il contratto da condividere con l'host RTEMS. Con la
-// memoria UMA (QEMU + GVSoC) host e MAGIA vedono la L2 agli STESSI indirizzi,
-// quindi valgono tali e quali anche sull'host. Da verificare che tutta la zona
-// 0xC000_0000 - 0xC100_0000 sia condivisa
+// Riccardo: this file is the contract to share with the RTEMS host. With UMA
+// memory (QEMU + GVSoC) host and MAGIA see the L2 at the SAME addresses, so
+// these values hold unchanged on the host too. Still to be verified that the
+// whole 0xC000_0000 - 0xC100_0000 range is shared.
 
 #pragma once
 #include <stdint.h>
 
-// ---- Cella "ready": sostituisce LETTER_0/1 --------------------------------
-// Sequenza (la memoria condivisa puo' sopravvivere tra due esecuzioni):
-//   host:   flag = 0, indirizzi = 0, fence w,w        <- invalida residui vecchi
-//           inizializza le caselle
-//           scrive OFL_H2A_ADDR / OFL_A2H_ADDR, fence w,w
-//           flag = OFL_READY_MAGIC                    <- per ULTIMO
-//   device: attende flag == OFL_READY_MAGIC, fence r,r
-//           legge OFL_H2A_ADDR / OFL_A2H_ADDR
-//           fence r,w, flag = 0                       <- "consuma" il flag
-// Riccardo: la parte "host:" della sequenza e' quella da scrivere su RTEMS, PRIMA
-// del fetch_enable di MAGIA: cosi' MAGIA parte solo a memoria gia' pronta e non
-// puo' vedere un flag rimasto da una sessione precedente.
+// ---- "ready" cell: replaces LETTER_0/1 ------------------------------------
+// Sequence (the shared memory may survive between two runs):
+//   host:   flag = 0, addresses = 0, fence w,w        <- invalidate stale leftovers
+//           initialize the mailboxes
+//           write OFL_H2A_ADDR / OFL_A2H_ADDR, fence w,w
+//           flag = OFL_READY_MAGIC                    <- LAST
+//   device: wait for flag == OFL_READY_MAGIC, fence r,r
+//           read OFL_H2A_ADDR / OFL_A2H_ADDR
+//           fence r,w, flag = 0                       <- "consume" the flag
+// Riccardo: the "host:" part of the sequence is what must be written on RTEMS,
+// BEFORE the MAGIA fetch_enable: this way MAGIA starts only with the memory
+// already set up and cannot see a flag left over from a previous session.
 
-#define OFL_READY_FLAG   0xC0000000u   // l'host ci scrive OFL_READY_MAGIC per ULTIMO
-#define OFL_H2A_ADDR     0xC0000004u   // indirizzo della casella host -> device
-#define OFL_A2H_ADDR     0xC0000008u   // indirizzo della casella device -> host
+#define OFL_READY_FLAG   0xC0000000u   // the host writes OFL_READY_MAGIC here LAST
+#define OFL_H2A_ADDR     0xC0000004u   // address of the host -> device mailbox
+#define OFL_A2H_ADDR     0xC0000008u   // address of the device -> host mailbox
 #define OFL_READY_MAGIC  0xCAFEBABEu
 
-// ---- Le due caselle (struct ring_buf di ringbuf.h, allineate a 64 B) -------
+// ---- The two mailboxes (struct ring_buf from ringbuf.h, 64 B aligned) ------
 #define OFL_H2A_RING     0xC0000100u
 #define OFL_A2H_RING     0xC0000200u
-#define OFL_H2A_DATA     0xC0001000u   // spazio dati della casella h2a
-#define OFL_A2H_DATA     0xC0001400u   // spazio dati della casella a2h
-#define OFL_RING_SLOTS   64u           // posti per casella (HERO ne usa 16; qui di piu'
-                                       // perche' il finto host accoda tutto in anticipo)
+#define OFL_H2A_DATA     0xC0001000u   // data area of the h2a mailbox
+#define OFL_A2H_DATA     0xC0001400u   // data area of the a2h mailbox
+#define OFL_RING_SLOTS   64u           // slots per mailbox (HERO uses 16; more here
+                                       // because the fake host queues everything up front)
 
-//Le 64 parole stanno da 0xC000_1000 a 0xC000_10FF (h2a) e da 0xC000_1400 a 0xC000_14FF (a2h).
-// 64 posti per casella ciascuno da 1 parola (4 B) = 256 B di dati ciascuna. 64*4 =256 byte= 0x100
-// ---- Heap per i buffer dei dati (map) e per i buffer argomenti -------------
+// The 64 words span 0xC000_1000 - 0xC000_10FF (h2a) and 0xC000_1400 - 0xC000_14FF (a2h).
+// 64 slots per mailbox, 1 word (4 B) each = 256 B of data each. 64*4 = 256 bytes = 0x100
+// ---- Heap for the data buffers (map) and the argument buffers ---------------
 #define OFL_HEAP_BASE    0xC0010000u
 #define OFL_HEAP_END     0xC1000000u
 
-// ---- Protocollo: identico a HERO (hero_api.h / sw_mailbox.h) ---------------
-#define MBOX_DEVICE_START  (0x02U)   // host->dev: START, &funzione, &argbuf, 0
-#define MBOX_DEVICE_DONE   (0x04U)   // dev->host: DONE, cicli, dma, tot, dma, issue, compute
-#define MBOX_DEVICE_STOP   (0x0FU)   // host->dev: esci dal ciclo
-#define MBOX_DEVICE_LOGLVL (0x10U)   // host->dev: LOGLVL, valore (ignorato)
-#define MBOX_DONE_WORDS    7u        // parole che seguono una risposta DONE (DONE compreso)
+// ---- Protocol: identical to HERO (hero_api.h / sw_mailbox.h) ----------------
+#define MBOX_DEVICE_START  (0x02U)   // host->dev: START, &function, &argbuf, 0
+#define MBOX_DEVICE_DONE   (0x04U)   // dev->host: DONE, cycles, dma, tot, dma, issue, compute
+#define MBOX_DEVICE_STOP   (0x0FU)   // host->dev: exit the loop
+#define MBOX_DEVICE_LOGLVL (0x10U)   // host->dev: LOGLVL, value (ignored)
+#define MBOX_DONE_WORDS    7u        // words making up a DONE reply (DONE included)

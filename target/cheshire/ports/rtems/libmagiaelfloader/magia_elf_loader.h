@@ -123,6 +123,26 @@ int magia_elf_find_omp_kernel(const uint8_t *file_base,
                               const char *suffix,
                               magia_elf_sym_t *sym);
 
+/* Common signature of the OpenMP kernel wrappers (OmpKernelWrapper) */
+typedef void (*kernel_t)(uint64_t);
+
+/*
+ * magia_elf_sym_visitor_t for magia_elf_foreach_symbol(): prints address and
+ * name of every OpenMP kernel (STT_FUNC with MAGIA_OMP_KERNEL_PREFIX). arg is
+ * unused. Always returns 0 (visits the whole table).
+ */
+int print_omp_kernel(const magia_elf_sym_t *sym, void *arg);
+
+/*
+ * Resolves the OpenMP kernel ending with suffix (see
+ * magia_elf_find_omp_kernel()) and checks that it lies in the MAGIA L2.
+ * Returns its address, or NULL (with a message) if it is missing, ambiguous
+ * or outside the L2.
+ */
+kernel_t find_kernel(const uint8_t *file_base,
+                     size_t file_size,
+                     const char *suffix);
+
 #ifdef __cplusplus
 }
 #endif

@@ -54,11 +54,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <elf.h>
-#include <rtems/counter.h>
 #include <rtems/magia_elf_loader.h>
-#include "ringbuf.h"
-#include "offload_layout.h"
+#include <rtems/openmp_plugin.h>
 
 
 const char rtems_test_name[] = "OMP OFFLOAD";
@@ -69,8 +66,6 @@ const char rtems_test_name[] = "OMP OFFLOAD";
  * (offload_layout.h). Outside the RTEMS RAM region: requires a QEMU RAM
  * covering it (e.g. -m 2G).
  */
-
-typedef void (*kernel_t)(uint64_t);      // common signature of the wrappers (OmpKernelWrapper)
 
 /* MAGIA ELF embedded in the image by magia_elf.c (.incbin) */
 extern const unsigned char magia_elf[];
@@ -97,38 +92,6 @@ extern const size_t magia_elf_size;
 #define KERNEL_MAP_TO_SUFFIX     "_l32"
 #define KERNEL_MAP_TOFROM_SUFFIX "_l36"
 
-static int print_omp_kernel(const magia_elf_sym_t *sym, void *arg)
-{
-    (void) arg;
-    if (sym->type == STT_FUNC &&
-        strncmp(sym->name, MAGIA_OMP_KERNEL_PREFIX,
-                sizeof(MAGIA_OMP_KERNEL_PREFIX) - 1) == 0)
-        printf("[host]   0x%08" PRIx32 " %s\n", (uint32_t)sym->value, sym->name);
-    return 0;
-}
-
-static kernel_t find_kernel(const char *suffix)
-{
-    magia_elf_sym_t sym;
-    int rv = magia_elf_find_omp_kernel(magia_elf, magia_elf_size, suffix, &sym);
-
-    if (rv == -2) {
-        printf("[host] ambiguous kernel: %s\n", suffix);
-        return 0;
-    }
-    if (rv != 0) {
-        printf("[host] kernel not found: %s\n", suffix);
-        return 0;
-    }
-    // MAGIA is 32-bit and the kernel must lie in the loaded L2
-    if (sym.value < MAGIA_L2_START || sym.value > MAGIA_L2_END) {
-        printf("[host] kernel %s at 0x%" PRIx64 " outside the MAGIA L2\n",
-               sym.name, sym.value);
-        return 0;
-    }
-    return (kernel_t)(uintptr_t)sym.value;
-}
-
 // In HERO: satisfy_requested_symbols (rtl.cpp). Finds the addresses of the
 // wrapper functions, one per #pragma omp target.
 // As in HERO it is all or nothing: returns 0 only if all kernels are
@@ -143,9 +106,9 @@ static int resolve_kernels(kernel_t *nop, kernel_t *map_to, kernel_t *map_tofrom
         printf("[host]   no .symtab (MAGIA ELF stripped?)\n");
         return -1;
     }
-    *nop        = find_kernel(KERNEL_NOP_SUFFIX);
-    *map_to     = find_kernel(KERNEL_MAP_TO_SUFFIX);
-    *map_tofrom = find_kernel(KERNEL_MAP_TOFROM_SUFFIX);
+    *nop        = find_kernel(magia_elf, magia_elf_size, KERNEL_NOP_SUFFIX);
+    *map_to     = find_kernel(magia_elf, magia_elf_size, KERNEL_MAP_TO_SUFFIX);
+    *map_tofrom = find_kernel(magia_elf, magia_elf_size, KERNEL_MAP_TOFROM_SUFFIX);
 
     if (*nop == NULL || *map_to == NULL || *map_tofrom == NULL)
         return -1;
@@ -153,207 +116,17 @@ static int resolve_kernels(kernel_t *nop, kernel_t *map_to, kernel_t *map_tofrom
 }
 
 // ===========================================================================
-// PART 2 - what libomptarget + the HERO plugin do (host side)
+// PART 2 - what libomptarget + the HERO plugin do (host side) is in the
+// libopenmpplugin (device init/stop, data alloc/submit/retrieve, target
+// regions) and libmagiamailbox (mailboxes and "ready" cell) static libraries.
 // ===========================================================================
-// Riccardo: with UMA (QEMU + GVSoC) host and MAGIA see the L2 at the same addresses,
-// so these pointers are valid on RTEMS too (see offload_layout.h).
-static volatile struct ring_buf *const h2a = (volatile struct ring_buf *)OFL_H2A_RING;
-static volatile struct ring_buf *const a2h = (volatile struct ring_buf *)OFL_A2H_RING;
 
-// Riccardo: MEMORY ALLOCATION. In HERO: __tgt_rtl_data_alloc (rtl.cpp) ->
-// GOMP_OFFLOAD_alloc (plugin-hero-dev.cpp) -> hero_dev_l2_malloc (o1heap).
-// Here a bump allocator that never frees is enough.
-static uintptr_t heap_next;
-static uintptr_t data_alloc(uint32_t size)
-{
-    uintptr_t p = heap_next;
-    heap_next += (size + 7u) & ~7u;
-    if (heap_next > OFL_HEAP_END)
-        rtems_panic("[host] L2 heap exhausted");
-    return p;
-}
-
-// Riccardo: HOST -> DEVICE COPY. In HERO: __tgt_rtl_data_submit -> GOMP_OFFLOAD_host2dev.
-static void data_submit(uintptr_t dev, const void *host, uint32_t size)
-{
-    for (uint32_t i = 0; i < size; i++)
-        ((volatile uint8_t *)dev)[i] = ((const uint8_t *)host)[i];
-}
-
-// Riccardo: DEVICE -> HOST COPY. In HERO: __tgt_rtl_data_retrieve -> GOMP_OFFLOAD_dev2host.
-static void data_retrieve(void *host, uintptr_t dev, uint32_t size)
-{
-    for (uint32_t i = 0; i < size; i++)
-        ((uint8_t *)host)[i] = ((volatile uint8_t *)dev)[i];
-}
-
-// Maximum wait for each mailbox word. HERO waits without limit
-// (while (hero_dev_mbox_read(...)); in rtl.cpp); here a timeout keeps the test
-// from hanging if MAGIA does not start or gets stuck. GVSoC simulates MAGIA much
-// more slowly than QEMU's real time: a passing test still takes ~3 s.
-// Also applies to the wait for the "ready" flag in magia_dev_stop.
-// Can be overridden via cflags.
+// Maximum wait for each mailbox word, passed to the libopenmpplugin API.
+// GVSoC simulates MAGIA much more slowly than QEMU's real time: a passing test
+// still takes ~3 s. Can be overridden via cflags.
 #ifndef OFL_MBOX_TIMEOUT_MS
 #define OFL_MBOX_TIMEOUT_MS 30000u
 #endif
-
-// Retries op (rb_host_get/rb_host_put) until it succeeds or the timeout expires.
-// Time is measured with the CPU counter (CLINT mtime), which works even
-// without a clock driver. The counter is 32-bit: differences are accumulated, so
-// counter wrap-around is not a problem.
-static int mbox_wait(int (*op)(volatile struct ring_buf *, void *),
-                     volatile struct ring_buf *rb, uint32_t *w)
-{
-    uint64_t limit = (uint64_t)rtems_counter_frequency() * OFL_MBOX_TIMEOUT_MS / 1000u;
-    uint64_t elapsed = 0;
-    rtems_counter_ticks last = rtems_counter_read();
-
-    while ((*op)(rb, w)) {
-        rtems_counter_ticks now = rtems_counter_read();
-        elapsed += rtems_counter_difference(now, last);
-        last = now;
-        if (elapsed >= limit)
-            return -1;
-    }
-    return 0;
-}
-
-static void print_mbox_state(void)
-{
-    printf("[host]   h2a head=%" PRIu32 " tail=%" PRIu32
-           ", a2h head=%" PRIu32 " tail=%" PRIu32 ", ready=0x%08" PRIx32 "\n",
-           h2a->prod.head, h2a->cons.tail, a2h->prod.head, a2h->cons.tail,
-           *(volatile uint32_t *)OFL_READY_FLAG);
-    // ready still OFL_READY_MAGIC: MAGIA never picked up the mailboxes (did it not start?)
-}
-
-// Riccardo: WRITE to the h2a mailbox. In HERO: hero_dev_mbox_write (mailbox.c).
-// rb_host_put from ringbuf.h can be reused as is. 0 = written, -1 = timeout.
-static int host_mbox_write(uint32_t w)
-{
-    if (mbox_wait(rb_host_put, h2a, &w)) {
-        printf("[host] timeout: h2a mailbox full\n");
-        print_mbox_state();
-        return -1;
-    }
-    return 0;
-}
-
-// Riccardo: READ from the a2h mailbox. In HERO: hero_dev_mbox_read (mailbox.c).
-// Blocking as in HERO, because the device runs in parallel. 0 = read, -1 = timeout.
-static int host_mbox_read(uint32_t *w)
-{
-    if (mbox_wait(rb_host_get, a2h, w)) {
-        printf("[host] timeout: no reply in the a2h mailbox after %u ms\n",
-               OFL_MBOX_TIMEOUT_MS);
-        print_mbox_state();
-        return -1;
-    }
-    return 0;
-}
-
-// Riccardo: argument buffer. In HERO (rtl.cpp, __tgt_rtl_init_device) there is
-// only one, dev_arg_buf, allocated at initialization and reused for every offload:
-// this works because the host waits for DONE before the next region.
-#define ARG_BUF_SIZE 16u                 // as in rtl.cpp:41
-static uintptr_t dev_arg_buf;
-
-static void invalidate_ready(void)
-{
-    *(volatile uint32_t *)OFL_READY_FLAG = 0;
-    *(volatile uint32_t *)OFL_H2A_ADDR   = 0;
-    *(volatile uint32_t *)OFL_A2H_ADDR   = 0;
-    asm volatile("fence w,w" ::: "memory");
-}
-
-// Riccardo: DEVICE INITIALIZATION. In HERO: __tgt_rtl_init_device ->
-// hero_dev_init / hero_dev_alloc_mboxes (mailboxes + LETTER_0/1). Here the
-// mailboxes are at fixed addresses and the "ready" cell replaces LETTER_0/1
-// (offload_layout.h). Must be done BEFORE the MAGIA fetch enable.
-static void magia_dev_init(void)
-{
-    // First of all invalidate the "ready" cell: if the shared memory
-    // survives between two runs, a flag left over from a previous run
-    // must never be seen as valid while we set up the mailboxes.
-    invalidate_ready();
-
-    heap_next = OFL_HEAP_BASE;
-
-    rb_init(h2a, OFL_RING_SLOTS, sizeof(uint32_t));
-    rb_init(a2h, OFL_RING_SLOTS, sizeof(uint32_t));
-    // data_v (address seen by the host) and data_p (seen by the device) coincide
-    // with UMA. They differ only with a virtual-memory host (Linux in HERO).
-    h2a->prod.data_v = h2a->prod.data_p = OFL_H2A_DATA;
-    a2h->prod.data_v = a2h->prod.data_p = OFL_A2H_DATA;
-
-    dev_arg_buf = data_alloc(ARG_BUF_SIZE * sizeof(uint64_t));
-
-    // Addresses first, then the flag, LAST (same order as the device).
-    *(volatile uint32_t *)OFL_H2A_ADDR = OFL_H2A_RING;
-    *(volatile uint32_t *)OFL_A2H_ADDR = OFL_A2H_RING;
-    asm volatile("fence w,w" ::: "memory");
-    *(volatile uint32_t *)OFL_READY_FLAG = OFL_READY_MAGIC;
-}
-
-// Riccardo: RUNNING A REGION. In HERO: __tgt_rtl_run_target_team_region
-// (rtl.cpp:457-519): copies the arguments into dev_arg_buf, sends START, kernel,
-// argbuf, no. of miss handlers, then WAITS for DONE and the 6 words that follow it.
-// Returns 0 if the region completed, -1 otherwise.
-static int run_target_region(kernel_t kernel, uint32_t nargs, const uintptr_t *dev_ptrs)
-{
-    uint64_t args[ARG_BUF_SIZE];
-    uint32_t done[MBOX_DONE_WORDS];
-
-    if (nargs > ARG_BUF_SIZE) {
-        printf("[host] FAIL: %" PRIu32 " arguments, maximum %u\n", nargs, ARG_BUF_SIZE);
-        return -1;
-    }
-    for (uint32_t i = 0; i < nargs; i++)
-        args[i] = (uint64_t)dev_ptrs[i];
-    data_submit(dev_arg_buf, args, nargs * sizeof(uint64_t));   // __tgt_rtl_data_submit
-
-    if (host_mbox_write(MBOX_DEVICE_START) ||
-        host_mbox_write((uint32_t)(uintptr_t)kernel) ||   // wrapper address
-        host_mbox_write((uint32_t)dev_arg_buf) ||         // argument buffer address
-        host_mbox_write(0))                               // no. of miss handlers (unused)
-        return -1;
-
-    // HERO discards words other than DONE only for MBOX_DEVICE_PRINT, which the
-    // MAGIA device does not use: any other word is a protocol error.
-    if (host_mbox_read(&done[0]))
-        return -1;
-    if (done[0] != MBOX_DEVICE_DONE) {
-        printf("[host] FAIL: expected DONE (0x%02x), read 0x%08" PRIx32 "\n",
-               MBOX_DEVICE_DONE, done[0]);
-        return -1;
-    }
-    for (uint32_t i = 1; i < MBOX_DONE_WORDS; i++) {      // cycles, dma + 4 counters
-        if (host_mbox_read(&done[i])) {
-            printf("[host] FAIL: incomplete DONE\n");
-            return -1;
-        }
-    }
-    // Data written by the kernel is read only after DONE has been seen
-    asm volatile("fence r,r" ::: "memory");
-    printf("[host] region 0x%08" PRIx32 " DONE, kernel cycles = %" PRIu32 "\n",
-           (uint32_t)(uintptr_t)kernel, done[1]);
-    return 0;
-}
-
-// Riccardo: END. In HERO the STOP is sent by __tgt_rtl_deinit / hero_dev_exit.
-// The device leaves gomp_offload_manager and main returns (GVSoC terminates).
-static void magia_dev_stop(void)
-{
-    if (host_mbox_write(MBOX_DEVICE_STOP) == 0)
-    {
-        printf("[host] STOP sent\n");
-    }
-    else
-    {
-        printf("[host] FAIL: STOP send failed\n");
-    }
-    invalidate_ready();
-}
 
 // ---------------------------------------------------------------------------
 // The "host program": regions() from kernels_omp.c, written by hand.
@@ -369,18 +142,18 @@ static int regions(void)
     uint32_t tmp_2 = 10;
 
     // #pragma omp target  { nop }           ("enter_omp_init")
-    if (run_target_region(k_nop, 0, NULL))
+    if (run_target_region(k_nop, 0, NULL, OFL_MBOX_TIMEOUT_MS))
         return -1;
 
     // #pragma omp target  { nop }           ("enter_omp_nop")
-    if (run_target_region(k_nop, 0, NULL))
+    if (run_target_region(k_nop, 0, NULL, OFL_MBOX_TIMEOUT_MS))
         return -1;
 
     // #pragma omp target map(to: tmp_1)
     {
         uintptr_t p1 = data_alloc(sizeof tmp_1);
         data_submit(p1, &tmp_1, sizeof tmp_1);              // "to": copy into L2
-        if (run_target_region(k_map_to, 1, &p1))
+        if (run_target_region(k_map_to, 1, &p1, OFL_MBOX_TIMEOUT_MS))
             return -1;
         // "to" does not copy back; data_delete: the allocator does not free
     }
@@ -390,7 +163,7 @@ static int regions(void)
         uintptr_t ptrs[2] = { data_alloc(sizeof tmp_1), data_alloc(sizeof tmp_2) };
         data_submit(ptrs[0], &tmp_1, sizeof tmp_1);
         data_submit(ptrs[1], &tmp_2, sizeof tmp_2);
-        if (run_target_region(k_map_tofrom, 2, ptrs))
+        if (run_target_region(k_map_tofrom, 2, ptrs, OFL_MBOX_TIMEOUT_MS))
             return -1;
         data_retrieve(&tmp_1, ptrs[0], sizeof tmp_1);       // "from": copy back to the host
         data_retrieve(&tmp_2, ptrs[1], sizeof tmp_2);
@@ -442,7 +215,7 @@ static rtems_task Init( rtems_task_argument ignored )
   }
 
   /* Always STOP, also on failure, so that MAGIA leaves and GVSoC ends */
-  magia_dev_stop();
+  magia_dev_stop( OFL_MBOX_TIMEOUT_MS );
 
   if ( errors != 0 ) {
     /* no TEST_END(): "*** END OF TEST" means success for the RTEMS tester */

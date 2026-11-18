@@ -147,6 +147,24 @@ ifneq ($(wildcard $(BSP_DIR)/test_fetch_enable),)
 		$(RTEMS_DIR)/cpukit/include/rtems/magia_elf_loader.h
 	install -Dm644 $(BSP_DIR)/libmagiaelfloader/libmagiaelfloader.yml \
 		$(RTEMS_DIR)/spec/build/cpukit/libmagiaelfloader.yml
+	@echo "[BSP] Copying magia_mailbox static library into RTEMS cpukit..."
+	install -Dm644 $(BSP_DIR)/libmagiamailbox/magia_mailbox.c \
+		$(RTEMS_DIR)/cpukit/libmagiamailbox/magia_mailbox.c
+	install -Dm644 $(BSP_DIR)/libmagiamailbox/magia_mailbox.h \
+		$(RTEMS_DIR)/cpukit/include/rtems/magia_mailbox.h
+	install -Dm644 $(BSP_DIR)/libmagiamailbox/ringbuf.h \
+		$(RTEMS_DIR)/cpukit/include/rtems/magia/ringbuf.h
+	install -Dm644 $(BSP_DIR)/libmagiamailbox/offload_layout.h \
+		$(RTEMS_DIR)/cpukit/include/rtems/magia/offload_layout.h
+	install -Dm644 $(BSP_DIR)/libmagiamailbox/libmagiamailbox.yml \
+		$(RTEMS_DIR)/spec/build/cpukit/libmagiamailbox.yml
+	@echo "[BSP] Copying openmp_plugin static library into RTEMS cpukit..."
+	install -Dm644 $(BSP_DIR)/libopenmpplugin/openmp_plugin.c \
+		$(RTEMS_DIR)/cpukit/libopenmpplugin/openmp_plugin.c
+	install -Dm644 $(BSP_DIR)/libopenmpplugin/openmp_plugin.h \
+		$(RTEMS_DIR)/cpukit/include/rtems/openmp_plugin.h
+	install -Dm644 $(BSP_DIR)/libopenmpplugin/libopenmpplugin.yml \
+		$(RTEMS_DIR)/spec/build/cpukit/libopenmpplugin.yml
 	install -Dm644 $(BSP_DIR)/libmagiaelfloader/cpukit-grp.yml \
 		$(RTEMS_DIR)/spec/build/cpukit/grp.yml
 	@echo "[BSP] Copying test_elf_loader sample into RTEMS..."
@@ -164,10 +182,6 @@ ifneq ($(wildcard $(BSP_DIR)/test_omp_offload),)
 		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/init.c
 	install -Dm644 $(BSP_DIR)/test_omp_offload/magia_elf.c \
 		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/magia_elf.c
-	install -Dm644 $(BSP_DIR)/test_omp_offload/ringbuf.h \
-		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/ringbuf.h
-	install -Dm644 $(BSP_DIR)/test_omp_offload/offload_layout.h \
-		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/offload_layout.h
 	install -Dm644 $(BSP_DIR)/test_omp_offload/test_omp_offload.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/test_omp_offload.yml
 	@echo "[BSP] Installing samples group (test_fetch_enable, test_elf_loader and test_omp_offload)..."

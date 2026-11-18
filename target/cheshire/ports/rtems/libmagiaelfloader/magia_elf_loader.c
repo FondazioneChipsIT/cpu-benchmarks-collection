@@ -517,3 +517,37 @@ int magia_elf_find_omp_kernel(const uint8_t *file_base,
 
     return ctx.matches == 1 ? 0 : -2;
 }
+
+int print_omp_kernel(const magia_elf_sym_t *sym, void *arg)
+{
+    (void) arg;
+    if (sym->type == STT_FUNC &&
+        strncmp(sym->name, MAGIA_OMP_KERNEL_PREFIX,
+                sizeof(MAGIA_OMP_KERNEL_PREFIX) - 1) == 0)
+        printf("[host]   0x%08" PRIx32 " %s\n", (uint32_t)sym->value, sym->name);
+    return 0;
+}
+
+kernel_t find_kernel(const uint8_t *file_base,
+                     size_t file_size,
+                     const char *suffix)
+{
+    magia_elf_sym_t sym;
+    int rv = magia_elf_find_omp_kernel(file_base, file_size, suffix, &sym);
+
+    if (rv == -2) {
+        printf("[host] ambiguous kernel: %s\n", suffix);
+        return NULL;
+    }
+    if (rv != 0) {
+        printf("[host] kernel not found: %s\n", suffix);
+        return NULL;
+    }
+    // MAGIA is 32-bit and the kernel must lie in the loaded L2
+    if (sym.value < MAGIA_L2_START || sym.value > MAGIA_L2_END) {
+        printf("[host] kernel %s at 0x%" PRIx64 " outside the MAGIA L2\n",
+               sym.name, sym.value);
+        return NULL;
+    }
+    return (kernel_t)(uintptr_t)sym.value;
+}

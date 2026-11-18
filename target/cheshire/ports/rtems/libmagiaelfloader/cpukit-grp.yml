@@ -27,6 +27,10 @@ links:
 - role: build-dependency
   uid: libmagiaelfloader
 - role: build-dependency
+  uid: libmagiamailbox
+- role: build-dependency
+  uid: libopenmpplugin
+- role: build-dependency
   uid: librtemscpu
 - role: build-dependency
   uid: librtemscxx

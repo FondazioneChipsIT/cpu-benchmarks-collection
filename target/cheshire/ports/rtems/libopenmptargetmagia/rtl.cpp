@@ -41,7 +41,7 @@
 
 #include <rtems/magia/omptarget_minimal.h>
 #include <rtems/magia/magia_api.h>
-#include <rtems/magia_elf_loader.h>   /* magia_elf_check_machine */
+#include <rtems/magia_elf_loader.h>   /* ELF check, symbols, load, fetch */
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -68,7 +68,18 @@
 #define OFL_MBOX_TIMEOUT_MS 30000u
 #endif
 
+/*
+ * Maximum number of entries (target regions) of the loaded image. HERO builds
+ * the device table with new/std::vector; a static one keeps rtl.cpp free of
+ * the C++ runtime.
+ */
+#define MAX_ENTRIES 64u
+
 static uintptr_t dev_arg_buf;
+
+static __tgt_offload_entry device_entries[MAX_ENTRIES];
+static __tgt_target_table  target_table;
+static bool magia_started;   // the MAGIA fetch enable can be raised only once
 
 static bool valid_device(int32_t device_id)
 {
@@ -85,6 +96,39 @@ static bool valid_size(int64_t size)
     return true;
   printf("[host] FAIL: invalid size %" PRId64 "\n", size);
   return false;
+}
+
+/*
+ * In HERO: satisfy_requested_symbols (rtl.cpp:106). Looks up the host entry
+ * in the MAGIA .symtab by exact name, as HERO does, then as OpenMP kernel
+ * suffix (the RTEMS host is not built by the HERO clang, so the full name may
+ * be unknown). Fills dev with the host entry and the device address.
+ */
+static int resolve_entry(const uint8_t *elf, size_t size,
+                         const __tgt_offload_entry *host, __tgt_offload_entry *dev)
+{
+  magia_elf_sym_t sym;
+
+  if (host->addr == nullptr || host->name == nullptr) {
+    printf("[host] FAIL: invalid host entry\n");
+    return -1;
+  }
+  if (magia_elf_find_symbol(elf, size, host->name, &sym) != 0 &&
+      magia_elf_find_omp_kernel(elf, size, host->name, &sym) != 0) {
+    printf("[host] FAIL: entry %s not found (or ambiguous) in the MAGIA ELF\n",
+           host->name);
+    return -1;
+  }
+  // Only functions (size 0), inside the L2: their address is a mailbox word
+  if (host->size != 0 || sym.value < MAGIA_L2_START || sym.value > MAGIA_L2_END) {
+    printf("[host] FAIL: entry %s at 0x%08" PRIx64 " is not a MAGIA kernel\n",
+           host->name, sym.value);
+    return -1;
+  }
+  *dev = *host;
+  dev->addr = (void *)(uintptr_t)sym.value;
+  printf("[host]   %s -> 0x%08" PRIx64 " %s\n", host->name, sym.value, sym.name);
+  return 0;
 }
 
 #ifdef __cplusplus
@@ -125,12 +169,72 @@ int32_t __tgt_rtl_init_device(int32_t device_id) {
   return OFFLOAD_SUCCESS;
 }
 
+__tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
+                                          __tgt_device_image *image) {
+
+  elf_info_t info = {};
+
+  if (!valid_device(device_id))
+    return nullptr;
+  if (!__tgt_rtl_is_valid_binary(image)) {
+    printf("[host] FAIL: the image is not a RISC-V ELF\n");
+    return nullptr;
+  }
+  if (dev_arg_buf == 0) {        // contract: mailboxes BEFORE the fetch enable
+    printf("[host] FAIL: load_binary before init_device\n");
+    return nullptr;
+  }
+  if (magia_started) {           // one MAGIA, one ELF
+    printf("[host] FAIL: MAGIA already running\n");
+    return nullptr;
+  }
+
+  const uint8_t *elf = (const uint8_t *)image->ImageStart;
+  size_t size = (size_t)((uintptr_t)image->ImageEnd - (uintptr_t)image->ImageStart);
+  size_t n = (size_t)(image->EntriesEnd - image->EntriesBegin);
+
+  if (image->EntriesBegin == nullptr || image->EntriesEnd < image->EntriesBegin ||
+      n > MAX_ENTRIES) {
+    printf("[host] FAIL: invalid entry table (%zu entries, maximum %u)\n",
+           n, MAX_ENTRIES);
+    return nullptr;
+  }
+
+  // 1. Resolve everything first: all or nothing, MAGIA not touched yet.
+  //    Every entry is looked up, so that every missing one gets reported.
+  printf("[host] OpenMP kernels in the MAGIA .symtab:\n");
+  if (magia_elf_foreach_symbol(elf, size, print_omp_kernel, nullptr) < 0) {
+    // In HERO: "Symbols section not found" -> return false
+    printf("[host] FAIL: no .symtab (MAGIA ELF stripped?)\n");
+    return nullptr;
+  }
+  printf("[host] resolving %zu entries:\n", n);
+  int missing = 0;
+  for (size_t i = 0; i < n; i++)
+    if (resolve_entry(elf, size, &image->EntriesBegin[i], &device_entries[i]))
+      missing++;
+  if (missing)
+    return nullptr;
+
+  // 2. Load and start. In HERO: map_to_mem + hero_dev_exe_start.
+  //    load_elf_from_memory() calls rtems_panic() on a malformed image.
+  load_elf_from_memory(elf, size, &info);
+  set_entry_point_and_enable_fetch(&info);
+  magia_started = true;
+
+  // 3. Device table, same order as the host entries
+  target_table.EntriesBegin = device_entries;
+  target_table.EntriesEnd   = device_entries + n;
+  return &target_table;
+}
+
 int32_t __tgt_rtl_deinit_device(int32_t device_id) {
 
   if (!valid_device(device_id))
     return OFFLOAD_FAIL;
 
   dev_arg_buf = 0;
+  magia_started = false;
   return magia_dev_stop(OFL_MBOX_TIMEOUT_MS) == 0 ? OFFLOAD_SUCCESS : OFFLOAD_FAIL;
 }
 

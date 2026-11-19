@@ -188,6 +188,10 @@ ifneq ($(wildcard $(BSP_DIR)/test_omp_offload),)
 		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/magia_elf.c
 	install -Dm644 $(BSP_DIR)/test_omp_offload/test_omp_offload.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/test_omp_offload.yml
+	@echo "[BSP] Generating test_omp_offload entry names from the MAGIA ELF..."
+	$(PYTHON) $(BSP_DIR)/test_omp_offload/gen_magia_omp_entries.py \
+		$(RTEMS_DIR)/testsuites/samples/test_omp_offload/magia_omp_entries.h \
+		$(MAGIA_ELF_ABS)
 	@echo "[BSP] Installing samples group (test_fetch_enable, test_elf_loader and test_omp_offload)..."
 	install -Dm644 $(BSP_DIR)/test_omp_offload/grp.yml \
 		$(RTEMS_DIR)/spec/build/testsuites/samples/grp.yml

@@ -41,6 +41,12 @@ struct __tgt_device_image {
   struct __tgt_offload_entry *EntriesEnd;   // End of table (non inclusive)
 };
 
+/// This struct contains the offload entries identified by the target runtime
+struct __tgt_target_table {
+  struct __tgt_offload_entry *EntriesBegin; // Begin of the table with all the entries
+  struct __tgt_offload_entry *EntriesEnd;   // End of the table with all the entries (non inclusive)
+};
+
 /* ---- Plugin interface (omptargetplugin.h) -------------------------------- */
 
 /* 1 if image is a little-endian RISC-V ELF (e_machine 243), 0 otherwise */
@@ -53,6 +59,17 @@ int32_t __tgt_rtl_number_of_devices(void);
  * Must be called BEFORE the MAGIA fetch enable.
  */
 int32_t __tgt_rtl_init_device(int32_t device_id);
+
+/*
+ * Resolves every host entry of image in the MAGIA ELF .symtab (exact name
+ * first, then OpenMP kernel suffix, e.g. "_l28"), loads the ELF in the L2 and
+ * enables the MAGIA fetch. All or nothing: returns NULL, without starting
+ * MAGIA, if any entry is missing. The returned table has the device address
+ * of each host entry, in the same order. Only one image can be loaded.
+ * Must be called AFTER __tgt_rtl_init_device (mailboxes before fetch enable).
+ */
+struct __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
+                                                 struct __tgt_device_image *image);
 
 /* Sends STOP to MAGIA and releases the mailboxes */
 int32_t __tgt_rtl_deinit_device(int32_t device_id);

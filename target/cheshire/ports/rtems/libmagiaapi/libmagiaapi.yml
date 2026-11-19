@@ -1,0 +1,23 @@
+SPDX-License-Identifier: CC-BY-SA-4.0 OR BSD-2-Clause
+build-type: library
+cflags: []
+copyrights:
+- Copyright (C) 2026 Chips-IT
+cppflags: []
+cxxflags: []
+enabled-by: true
+includes: []
+install:
+- destination: ${BSP_INCLUDEDIR}/rtems/magia
+  source:
+  - cpukit/include/rtems/magia/magia_api.h
+  - cpukit/include/rtems/magia/mailbox.h
+  - cpukit/include/rtems/magia/ringbuf.h
+  - cpukit/include/rtems/magia/offload_layout.h
+install-path: ${BSP_LIBDIR}
+links: []
+source:
+- cpukit/libmagiaapi/magia_api.c
+- cpukit/libmagiaapi/mailbox.c
+target: magia_api
+type: build

@@ -237,6 +237,35 @@ void set_entry_point_and_enable_fetch(const elf_info_t *info)
     write_fence();
   
 }
+int magia_elf_check_machine(const uint8_t *file_base,
+                            size_t file_size,
+                            uint16_t machine)
+{
+    uint16_t e_machine;
+
+    if (file_base == NULL || file_size < EI_NIDENT ||
+        memcmp(file_base, ELFMAG, SELFMAG) != 0 ||
+        file_base[EI_DATA] != ELFDATA2LSB) {
+        return 0;
+    }
+
+    if (file_base[EI_CLASS] == ELFCLASS32) {
+        if (file_size < sizeof(Elf32_Ehdr)) {
+            return 0;
+        }
+        e_machine = ((const Elf32_Ehdr *)file_base)->e_machine;
+    } else if (file_base[EI_CLASS] == ELFCLASS64) {
+        if (file_size < sizeof(Elf64_Ehdr)) {
+            return 0;
+        }
+        e_machine = ((const Elf64_Ehdr *)file_base)->e_machine;
+    } else {
+        return 0;
+    }
+
+    return e_machine == machine;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Symbol table                                                              */
 /* ------------------------------------------------------------------------ */

@@ -1,0 +1,96 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+
+/*
+ * omptarget_minimal: the subset of libomptarget's omptarget.h and
+ * omptargetplugin.h needed by the MAGIA target plugin (rtl.cpp) and by its
+ * callers. RTEMS has no libomptarget, so the types, return codes and the
+ * __tgt_rtl_* plugin interface are declared here. Usable from C and C++.
+ *
+ * Copyright (C) 2026 Chips-IT
+ */
+
+#ifndef OMPTARGET_MINIMAL_H
+#define OMPTARGET_MINIMAL_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Return codes of the __tgt_rtl_* functions (omptarget.h) */
+#define OFFLOAD_SUCCESS (0)
+#define OFFLOAD_FAIL    (~0)
+
+/// This struct is a record of an entry point or global. For a function
+/// entry point the size is expected to be zero
+struct __tgt_offload_entry {
+  void *addr;       // Pointer to the offload entry info (function or global)
+  char *name;       // Name of the function or global
+  size_t size;      // Size of the entry info (0 if it is a function)
+  int32_t flags;    // Flags associated with the entry, e.g. 'link'.
+  int32_t reserved; // Reserved, to be used by the runtime library.
+};
+
+/// This struct is a record of the device image information
+struct __tgt_device_image {
+  void *ImageStart;                         // Pointer to the target code start
+  void *ImageEnd;                           // Pointer to the target code end
+  struct __tgt_offload_entry *EntriesBegin; // Begin of table with all target entries
+  struct __tgt_offload_entry *EntriesEnd;   // End of table (non inclusive)
+};
+
+/* ---- Plugin interface (omptargetplugin.h) -------------------------------- */
+
+/* 1 if image is a little-endian RISC-V ELF (e_machine 243), 0 otherwise */
+int32_t __tgt_rtl_is_valid_binary(struct __tgt_device_image *image);
+
+int32_t __tgt_rtl_number_of_devices(void);
+
+/*
+ * Resets the L2 heap, sets up the mailboxes and allocates the argument buffer.
+ * Must be called BEFORE the MAGIA fetch enable.
+ */
+int32_t __tgt_rtl_init_device(int32_t device_id);
+
+/* Sends STOP to MAGIA and releases the mailboxes */
+int32_t __tgt_rtl_deinit_device(int32_t device_id);
+
+/* Returns NULL when the L2 heap is exhausted. hst_ptr and kind are ignored. */
+void *__tgt_rtl_data_alloc(int32_t device_id, int64_t size, void *hst_ptr,
+                           int32_t kind);
+
+/*
+ * Releases tgt_ptr, returned by __tgt_rtl_data_alloc. The L2 heap is a bump
+ * allocator: memory is not reclaimed, the pointer is only validated.
+ * LLVM <= 16 signature (no kind argument), as in the HERO plugin.
+ */
+int32_t __tgt_rtl_data_delete(int32_t device_id, void *tgt_ptr);
+
+int32_t __tgt_rtl_data_submit(int32_t device_id, void *tgt_ptr, void *hst_ptr,
+                              int64_t size);
+
+int32_t __tgt_rtl_data_retrieve(int32_t device_id, void *hst_ptr, void *tgt_ptr,
+                                int64_t size);
+
+/*
+ * tgt_entry_ptr: device address of the kernel wrapper.
+ * tgt_args[i] + tgt_offsets[i]: device address of the i-th argument.
+ */
+int32_t __tgt_rtl_run_target_team_region(int32_t device_id, void *tgt_entry_ptr,
+                                         void **tgt_args,
+                                         ptrdiff_t *tgt_offsets,
+                                         int32_t arg_num, int32_t team_num,
+                                         int32_t thread_limit,
+                                         uint64_t loop_tripcount);
+
+int32_t __tgt_rtl_run_target_region(int32_t device_id, void *tgt_entry_ptr,
+                                    void **tgt_args, ptrdiff_t *tgt_offsets,
+                                    int32_t arg_num);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* OMPTARGET_MINIMAL_H */

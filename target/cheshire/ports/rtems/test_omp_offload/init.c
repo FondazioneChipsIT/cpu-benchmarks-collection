@@ -55,7 +55,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <rtems/magia_elf_loader.h>
-#include <rtems/openmp_plugin.h>
+#include <rtems/magia/omptarget_minimal.h>
 
 
 const char rtems_test_name[] = "OMP OFFLOAD";
@@ -116,17 +116,15 @@ static int resolve_kernels(kernel_t *nop, kernel_t *map_to, kernel_t *map_tofrom
 }
 
 // ===========================================================================
-// PART 2 - what libomptarget + the HERO plugin do (host side) is in the
-// libopenmpplugin (device init/stop, data alloc/submit/retrieve, target
-// regions) and libmagiamailbox (mailboxes and "ready" cell) static libraries.
+// PART 2 - what the HERO plugin does (host side) is in libopenmptargetmagia
+// (the __tgt_rtl_* functions of rtl.cpp), built on top of libmagiaapi
+// (device init/stop, data alloc/submit/retrieve, mailboxes and "ready" cell).
 // ===========================================================================
 
-// Maximum wait for each mailbox word, passed to the libopenmpplugin API.
-// GVSoC simulates MAGIA much more slowly than QEMU's real time: a passing test
-// still takes ~3 s. Can be overridden via cflags.
-#ifndef OFL_MBOX_TIMEOUT_MS
-#define OFL_MBOX_TIMEOUT_MS 30000u
-#endif
+#define DEVICE_ID 0
+
+// kernel_t (function pointer) -> device entry pointer of the RTL interface
+#define ENTRY(k) ((void *)(uintptr_t)(k))
 
 // ---------------------------------------------------------------------------
 // The "host program": regions() from kernels_omp.c, written by hand.
@@ -142,31 +140,40 @@ static int regions(void)
     uint32_t tmp_2 = 10;
 
     // #pragma omp target  { nop }           ("enter_omp_init")
-    if (run_target_region(k_nop, 0, NULL, OFL_MBOX_TIMEOUT_MS))
+    if (__tgt_rtl_run_target_region(DEVICE_ID, ENTRY(k_nop), NULL, NULL, 0))
         return -1;
 
     // #pragma omp target  { nop }           ("enter_omp_nop")
-    if (run_target_region(k_nop, 0, NULL, OFL_MBOX_TIMEOUT_MS))
+    if (__tgt_rtl_run_target_region(DEVICE_ID, ENTRY(k_nop), NULL, NULL, 0))
         return -1;
 
     // #pragma omp target map(to: tmp_1)
     {
-        uintptr_t p1 = data_alloc(sizeof tmp_1);
-        data_submit(p1, &tmp_1, sizeof tmp_1);              // "to": copy into L2
-        if (run_target_region(k_map_to, 1, &p1, OFL_MBOX_TIMEOUT_MS))
+        void *p1 = __tgt_rtl_data_alloc(DEVICE_ID, sizeof tmp_1, &tmp_1, 0);
+        ptrdiff_t off = 0;
+        if (p1 == NULL ||                                    // "to": copy into L2
+            __tgt_rtl_data_submit(DEVICE_ID, p1, &tmp_1, sizeof tmp_1) ||
+            __tgt_rtl_run_target_region(DEVICE_ID, ENTRY(k_map_to), &p1, &off, 1) ||
+            // "to" does not copy back, only releases the device copy
+            __tgt_rtl_data_delete(DEVICE_ID, p1))
             return -1;
-        // "to" does not copy back; data_delete: the allocator does not free
     }
 
     // #pragma omp target map(tofrom: tmp_1, tmp_2)  { tmp_1 = tmp_2; }
     {
-        uintptr_t ptrs[2] = { data_alloc(sizeof tmp_1), data_alloc(sizeof tmp_2) };
-        data_submit(ptrs[0], &tmp_1, sizeof tmp_1);
-        data_submit(ptrs[1], &tmp_2, sizeof tmp_2);
-        if (run_target_region(k_map_tofrom, 2, ptrs, OFL_MBOX_TIMEOUT_MS))
+        void *ptrs[2] = { __tgt_rtl_data_alloc(DEVICE_ID, sizeof tmp_1, &tmp_1, 0),
+                          __tgt_rtl_data_alloc(DEVICE_ID, sizeof tmp_2, &tmp_2, 0) };
+        ptrdiff_t offs[2] = { 0, 0 };
+        if (ptrs[0] == NULL || ptrs[1] == NULL ||
+            __tgt_rtl_data_submit(DEVICE_ID, ptrs[0], &tmp_1, sizeof tmp_1) ||
+            __tgt_rtl_data_submit(DEVICE_ID, ptrs[1], &tmp_2, sizeof tmp_2) ||
+            __tgt_rtl_run_target_region(DEVICE_ID, ENTRY(k_map_tofrom), ptrs, offs, 2) ||
+            // "from": copy back to the host
+            __tgt_rtl_data_retrieve(DEVICE_ID, &tmp_1, ptrs[0], sizeof tmp_1) ||
+            __tgt_rtl_data_retrieve(DEVICE_ID, &tmp_2, ptrs[1], sizeof tmp_2) ||
+            __tgt_rtl_data_delete(DEVICE_ID, ptrs[0]) ||
+            __tgt_rtl_data_delete(DEVICE_ID, ptrs[1]))
             return -1;
-        data_retrieve(&tmp_1, ptrs[0], sizeof tmp_1);       // "from": copy back to the host
-        data_retrieve(&tmp_2, ptrs[1], sizeof tmp_2);
     }
 
     if (tmp_1 != tmp_2 || tmp_1 != 10) {
@@ -185,6 +192,23 @@ static rtems_task Init( rtems_task_argument ignored )
   (void) ignored;
 
   TEST_BEGIN();
+
+  /*
+   * As libomptarget does before loading an image: ask the plugin whether the
+   * embedded MAGIA ELF is a binary for this device (RISC-V ELF).
+   */
+  {
+    struct __tgt_device_image image = {
+      (void *) magia_elf, (void *) ( magia_elf + magia_elf_size ), NULL, NULL
+    };
+
+    if ( !__tgt_rtl_is_valid_binary( &image ) ) {
+      /* no TEST_END(): "*** END OF TEST" means success for the RTEMS tester */
+      printf( "[host] FAIL: embedded MAGIA ELF is not a valid RISC-V ELF\n" );
+      printf( "[host] TEST FAIL\n" );
+      rtems_test_exit( 1 );
+    }
+  }
 
   /*
    * As in HERO __tgt_rtl_load_binary: resolve the kernels first, on the
@@ -206,7 +230,12 @@ static rtems_task Init( rtems_task_argument ignored )
    * offload_layout.h): MAGIA starts only with the shared memory already set
    * up and cannot see a stale ready flag left by a previous run.
    */
-  magia_dev_init();
+  if ( __tgt_rtl_init_device( DEVICE_ID ) != OFFLOAD_SUCCESS ) {
+    /* MAGIA not started yet: no fetch enable, so no STOP needed */
+    printf( "[host] FAIL: device init failed\n" );
+    printf( "[host] TEST FAIL\n" );
+    rtems_test_exit( 1 );
+  }
   set_entry_point_and_enable_fetch( &elf_info );
 
   /* Execute offloaded regions */
@@ -215,7 +244,9 @@ static rtems_task Init( rtems_task_argument ignored )
   }
 
   /* Always STOP, also on failure, so that MAGIA leaves and GVSoC ends */
-  magia_dev_stop( OFL_MBOX_TIMEOUT_MS );
+  if ( __tgt_rtl_deinit_device( DEVICE_ID ) != OFFLOAD_SUCCESS ) {
+    errors = 1;
+  }
 
   if ( errors != 0 ) {
     /* no TEST_END(): "*** END OF TEST" means success for the RTEMS tester */

@@ -66,6 +66,17 @@ void load_elf_from_memory(const uint8_t *file_base,
 void set_entry_point_and_enable_fetch(const elf_info_t *info);
 
 /*
+ * Checks, WITHOUT calling rtems_panic(), that [file_base, file_base + file_size)
+ * is a little-endian ELF (32 or 64 bit, as accepted by load_elf_from_memory())
+ * whose e_machine is machine (e.g. EM_RISCV = 243).
+ * In HERO: elf_check_machine (libomptarget elf_common), used by
+ * __tgt_rtl_is_valid_binary. Returns 1 if valid, 0 otherwise.
+ */
+int magia_elf_check_machine(const uint8_t *file_base,
+                            size_t file_size,
+                            uint16_t machine);
+
+/*
  * Symbol table (.symtab) access, on the same in-memory ELF image passed to
  * load_elf_from_memory(). The image must still be available (it is not the
  * copy in the MAGIA L2: the section headers and .symtab are not loaded).

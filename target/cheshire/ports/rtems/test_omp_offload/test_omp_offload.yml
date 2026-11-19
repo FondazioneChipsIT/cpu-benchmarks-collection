@@ -17,7 +17,7 @@ stlib: []
 target: testsuites/samples/test_omp_offload.exe
 type: build
 use-after:
-- openmp_plugin
-- magia_mailbox
+- openmptargetmagia
+- magia_api
 - magia_elf_loader
 use-before: []

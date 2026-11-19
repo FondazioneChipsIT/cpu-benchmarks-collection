@@ -147,24 +147,28 @@ ifneq ($(wildcard $(BSP_DIR)/test_fetch_enable),)
 		$(RTEMS_DIR)/cpukit/include/rtems/magia_elf_loader.h
 	install -Dm644 $(BSP_DIR)/libmagiaelfloader/libmagiaelfloader.yml \
 		$(RTEMS_DIR)/spec/build/cpukit/libmagiaelfloader.yml
-	@echo "[BSP] Copying magia_mailbox static library into RTEMS cpukit..."
-	install -Dm644 $(BSP_DIR)/libmagiamailbox/magia_mailbox.c \
-		$(RTEMS_DIR)/cpukit/libmagiamailbox/magia_mailbox.c
-	install -Dm644 $(BSP_DIR)/libmagiamailbox/magia_mailbox.h \
-		$(RTEMS_DIR)/cpukit/include/rtems/magia_mailbox.h
-	install -Dm644 $(BSP_DIR)/libmagiamailbox/ringbuf.h \
+	@echo "[BSP] Copying magia_api static library into RTEMS cpukit..."
+	install -Dm644 $(BSP_DIR)/libmagiaapi/magia_api.c \
+		$(RTEMS_DIR)/cpukit/libmagiaapi/magia_api.c
+	install -Dm644 $(BSP_DIR)/libmagiaapi/mailbox.c \
+		$(RTEMS_DIR)/cpukit/libmagiaapi/mailbox.c
+	install -Dm644 $(BSP_DIR)/libmagiaapi/magia_api.h \
+		$(RTEMS_DIR)/cpukit/include/rtems/magia/magia_api.h
+	install -Dm644 $(BSP_DIR)/libmagiaapi/mailbox.h \
+		$(RTEMS_DIR)/cpukit/include/rtems/magia/mailbox.h
+	install -Dm644 $(BSP_DIR)/libmagiaapi/ringbuf.h \
 		$(RTEMS_DIR)/cpukit/include/rtems/magia/ringbuf.h
-	install -Dm644 $(BSP_DIR)/libmagiamailbox/offload_layout.h \
+	install -Dm644 $(BSP_DIR)/libmagiaapi/offload_layout.h \
 		$(RTEMS_DIR)/cpukit/include/rtems/magia/offload_layout.h
-	install -Dm644 $(BSP_DIR)/libmagiamailbox/libmagiamailbox.yml \
-		$(RTEMS_DIR)/spec/build/cpukit/libmagiamailbox.yml
-	@echo "[BSP] Copying openmp_plugin static library into RTEMS cpukit..."
-	install -Dm644 $(BSP_DIR)/libopenmpplugin/openmp_plugin.c \
-		$(RTEMS_DIR)/cpukit/libopenmpplugin/openmp_plugin.c
-	install -Dm644 $(BSP_DIR)/libopenmpplugin/openmp_plugin.h \
-		$(RTEMS_DIR)/cpukit/include/rtems/openmp_plugin.h
-	install -Dm644 $(BSP_DIR)/libopenmpplugin/libopenmpplugin.yml \
-		$(RTEMS_DIR)/spec/build/cpukit/libopenmpplugin.yml
+	install -Dm644 $(BSP_DIR)/libmagiaapi/libmagiaapi.yml \
+		$(RTEMS_DIR)/spec/build/cpukit/libmagiaapi.yml
+	@echo "[BSP] Copying openmptargetmagia static library into RTEMS cpukit..."
+	install -Dm644 $(BSP_DIR)/libopenmptargetmagia/rtl.cpp \
+		$(RTEMS_DIR)/cpukit/libopenmptargetmagia/rtl.cpp
+	install -Dm644 $(BSP_DIR)/libopenmptargetmagia/omptarget_minimal.h \
+		$(RTEMS_DIR)/cpukit/include/rtems/magia/omptarget_minimal.h
+	install -Dm644 $(BSP_DIR)/libopenmptargetmagia/libopenmptargetmagia.yml \
+		$(RTEMS_DIR)/spec/build/cpukit/libopenmptargetmagia.yml
 	install -Dm644 $(BSP_DIR)/libmagiaelfloader/cpukit-grp.yml \
 		$(RTEMS_DIR)/spec/build/cpukit/grp.yml
 	@echo "[BSP] Copying test_elf_loader sample into RTEMS..."

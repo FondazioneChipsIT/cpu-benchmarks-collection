@@ -43,6 +43,7 @@ static void invalidate_ready(void)
  * even without a clock driver. The counter is 32-bit: differences are
  * accumulated, so counter wrap-around is not a problem.
  * Returns 0 on success, -1 after timeout_ms milliseconds.
+ * timeout_ms == OFL_MBOX_WAIT_FOREVER: retries without limit, never -1.
  */
 static int mbox_wait(int (*op)(volatile struct ring_buf *, void *),
                      volatile struct ring_buf *rb, uint32_t *w, uint32_t timeout_ms)
@@ -50,6 +51,12 @@ static int mbox_wait(int (*op)(volatile struct ring_buf *, void *),
     uint64_t limit = (uint64_t)rtems_counter_frequency() * timeout_ms / 1000u;
     uint64_t elapsed = 0;
     rtems_counter_ticks last = rtems_counter_read();
+
+    if (timeout_ms == OFL_MBOX_WAIT_FOREVER) {
+        while ((*op)(rb, w))
+            ;
+        return 0;
+    }
 
     while ((*op)(rb, w)) {
         rtems_counter_ticks now = rtems_counter_read();

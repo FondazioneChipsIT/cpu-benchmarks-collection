@@ -66,13 +66,13 @@
 #define ARG_BUF_SIZE 16u
 
 /*
- * Maximum wait for each mailbox word. HERO waits without limit; here a
- * timeout keeps RTEMS from hanging if MAGIA does not start or gets stuck.
- * GVSoC simulates MAGIA much more slowly than QEMU's real time: a passing
- * test still takes ~3 s. Can be overridden via cxxflags.
+ * Wait for each mailbox word: without limit, as HERO does. If MAGIA does not
+ * start or gets stuck the host waits forever (the QEMU + GVSoC launcher
+ * --timeout still ends the run). A finite value in ms (e.g. 30000u) can be
+ * set via cxxflags to get a timeout and an error instead.
  */
-#ifndef OFL_MBOX_TIMEOUT_MS
-#define OFL_MBOX_TIMEOUT_MS 30000u
+#ifndef OFL_MBOX_WAIT_MS
+#define OFL_MBOX_WAIT_MS OFL_MBOX_WAIT_FOREVER
 #endif
 
 /*
@@ -297,7 +297,7 @@ int32_t __tgt_rtl_deinit_device(int32_t device_id) {
   magia_started = false;
   loaded_image = nullptr;
   loaded_entries = 0;
-  return magia_dev_stop(OFL_MBOX_TIMEOUT_MS) == 0 ? OFFLOAD_SUCCESS : OFFLOAD_FAIL;
+  return magia_dev_stop(OFL_MBOX_WAIT_MS) == 0 ? OFFLOAD_SUCCESS : OFFLOAD_FAIL;
 }
 
 static const char *alloc_kind_name(int32_t kind)
@@ -437,15 +437,15 @@ int32_t __tgt_rtl_run_target_team_region(int32_t device_id, void *tgt_entry_ptr,
     args[i] = (uint64_t)((uintptr_t)tgt_args[i] + tgt_offsets[i]);
   data_submit(dev_arg_buf, args, (uint32_t)arg_num * sizeof(uint64_t));
 
-  if (host_mbox_write(MBOX_DEVICE_START, OFL_MBOX_TIMEOUT_MS) ||
-      host_mbox_write(kernel, OFL_MBOX_TIMEOUT_MS) ||                  // wrapper address
-      host_mbox_write((uint32_t)dev_arg_buf, OFL_MBOX_TIMEOUT_MS) ||   // argument buffer address
-      host_mbox_write(0, OFL_MBOX_TIMEOUT_MS))                         // no. of miss handlers (unused)
+  if (host_mbox_write(MBOX_DEVICE_START, OFL_MBOX_WAIT_MS) ||
+      host_mbox_write(kernel, OFL_MBOX_WAIT_MS) ||                  // wrapper address
+      host_mbox_write((uint32_t)dev_arg_buf, OFL_MBOX_WAIT_MS) ||   // argument buffer address
+      host_mbox_write(0, OFL_MBOX_WAIT_MS))                         // no. of miss handlers (unused)
     return OFFLOAD_FAIL;
 
   // HERO discards words other than DONE only for MBOX_DEVICE_PRINT, which the
   // MAGIA device does not use: any other word is a protocol error.
-  if (host_mbox_read(&done[0], OFL_MBOX_TIMEOUT_MS))
+  if (host_mbox_read(&done[0], OFL_MBOX_WAIT_MS))
     return OFFLOAD_FAIL;
   if (done[0] != MBOX_DEVICE_DONE) {
     printf("[host] FAIL: expected DONE (0x%02x), read 0x%08" PRIx32 "\n",
@@ -453,7 +453,7 @@ int32_t __tgt_rtl_run_target_team_region(int32_t device_id, void *tgt_entry_ptr,
     return OFFLOAD_FAIL;
   }
   for (uint32_t i = 1; i < MBOX_DONE_WORDS; i++) {      // cycles, dma + 4 counters
-    if (host_mbox_read(&done[i], OFL_MBOX_TIMEOUT_MS)) {
+    if (host_mbox_read(&done[i], OFL_MBOX_WAIT_MS)) {
       printf("[host] FAIL: incomplete DONE\n");
       return OFFLOAD_FAIL;
     }

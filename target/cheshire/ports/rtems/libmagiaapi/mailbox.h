@@ -26,10 +26,12 @@ extern "C" {
 
 /*
  * timeout_ms: maximum wait for each mailbox word, chosen by the caller.
- * HERO waits without limit (while (hero_dev_mbox_read(...)); in rtl.cpp); here
- * a timeout keeps the application from hanging if MAGIA does not start or gets
- * stuck. Note that GVSoC simulates MAGIA much more slowly than QEMU's real time.
+ * OFL_MBOX_WAIT_FOREVER waits without limit, as HERO does
+ * (while (hero_dev_mbox_read(...)); in rtl.cpp). A finite timeout keeps the
+ * application from hanging if MAGIA does not start or gets stuck. Note that
+ * GVSoC simulates MAGIA much more slowly than QEMU's real time.
  */
+#define OFL_MBOX_WAIT_FOREVER UINT32_MAX
 
 /*
  * MAILBOX SETUP. In HERO: hero_dev_alloc_mboxes (mailboxes + LETTER_0/1).

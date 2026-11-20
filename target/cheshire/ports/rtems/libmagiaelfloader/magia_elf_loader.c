@@ -20,6 +20,55 @@
 #include <stdio.h>
 #include <string.h>
 
+typedef struct {
+    const char *name;
+    magia_elf_sym_t *sym;
+} find_by_name_t;
+
+/*
+ * ELF header fields, independent of the ELF class (as shdr_t below for the
+ * section headers).
+ */
+typedef struct {
+    unsigned bits;          /* 32 or 64: ELF class */
+    uint16_t machine;
+    uint64_t entry;
+    uint64_t phoff;
+    uint16_t phnum;
+    uint16_t phentsize;
+    uint64_t shoff;
+    uint16_t shnum;
+    uint16_t shentsize;
+} ehdr_t;
+
+/* Program header fields needed to load a segment, independent of the class */
+typedef struct {
+    uint32_t type;
+    uint64_t offset;
+    uint64_t paddr;
+    uint64_t filesz;
+    uint64_t memsz;
+} phdr_t;
+
+/*
+ * Section header fields needed to walk .symtab, independent of the ELF class.
+ * The class was already validated by check_elf_ident().
+ */
+typedef struct {
+    uint32_t type;
+    uint32_t link;
+    uint64_t offset;
+    uint64_t size;
+    uint64_t entsize;
+} shdr_t;
+
+typedef struct {
+    const char *suffix;
+    size_t suffix_len;
+    magia_elf_sym_t *sym;
+    unsigned matches;
+} find_kernel_t;
+
 /* true if [off, off + len) is inside [0, size), without overflow */
 static bool range_ok(uint64_t off, uint64_t len, uint64_t size)
 {
@@ -38,6 +87,90 @@ static void check_elf_ident(const unsigned char *ident)
 
     if (ident[EI_CLASS] != ELFCLASS32 && ident[EI_CLASS] != ELFCLASS64) {
         rtems_panic("Unsupported ELF class");
+    }
+}
+
+static void check_image(const uint8_t *file_base, size_t file_size)
+{
+    if (file_size < EI_NIDENT) {
+        rtems_panic("ELF image too small");
+    }
+
+    check_elf_ident(file_base);
+}
+
+/*
+ * Reads the ELF header of file_base (identification already checked).
+ * Returns 0, or -1 if the class is unknown (out->bits = 0) or the header
+ * exceeds file_size (out->bits set). Never panics: callers decide.
+ */
+static int read_ehdr(const uint8_t *file_base, size_t file_size, ehdr_t *out)
+{
+    if (file_base[EI_CLASS] == ELFCLASS32) {
+        const Elf32_Ehdr *eh = (const Elf32_Ehdr *)file_base;
+
+        out->bits = 32;
+        if (file_size < sizeof(*eh)) {
+            return -1;
+        }
+        out->machine = eh->e_machine;
+        out->entry = eh->e_entry;
+        out->phoff = eh->e_phoff;
+        out->phnum = eh->e_phnum;
+        out->phentsize = eh->e_phentsize;
+        out->shoff = eh->e_shoff;
+        out->shnum = eh->e_shnum;
+        out->shentsize = eh->e_shentsize;
+    } else if (file_base[EI_CLASS] == ELFCLASS64) {
+        const Elf64_Ehdr *eh = (const Elf64_Ehdr *)file_base;
+
+        out->bits = 64;
+        if (file_size < sizeof(*eh)) {
+            return -1;
+        }
+        out->machine = eh->e_machine;
+        out->entry = eh->e_entry;
+        out->phoff = eh->e_phoff;
+        out->phnum = eh->e_phnum;
+        out->phentsize = eh->e_phentsize;
+        out->shoff = eh->e_shoff;
+        out->shnum = eh->e_shnum;
+        out->shentsize = eh->e_shentsize;
+    } else {
+        out->bits = 0;
+        return -1;
+    }
+
+    return 0;
+}
+
+/* As read_ehdr(), but panics on error: for already validated images */
+static void get_ehdr(const uint8_t *file_base, size_t file_size, ehdr_t *out)
+{
+    if (read_ehdr(file_base, file_size, out) != 0) {
+        rtems_panic("ELF%u header exceeds file size", out->bits);
+    }
+}
+
+static void get_phdr(const uint8_t *file_base, const ehdr_t *eh, unsigned i,
+                     phdr_t *out)
+{
+    if (eh->bits == 32) {
+        const Elf32_Phdr *ph = (const Elf32_Phdr *)(file_base + eh->phoff) + i;
+
+        out->type = ph->p_type;
+        out->offset = ph->p_offset;
+        out->paddr = ph->p_paddr;
+        out->filesz = ph->p_filesz;
+        out->memsz = ph->p_memsz;
+    } else {
+        const Elf64_Phdr *ph = (const Elf64_Phdr *)(file_base + eh->phoff) + i;
+
+        out->type = ph->p_type;
+        out->offset = ph->p_offset;
+        out->paddr = ph->p_paddr;
+        out->filesz = ph->p_filesz;
+        out->memsz = ph->p_memsz;
     }
 }
 
@@ -73,113 +206,58 @@ static void load_segment(uint64_t paddr,
     }
 }
 
-static void load_elf32_segments(const uint8_t *file_base,
-                                size_t file_size,
-                                elf_info_t *info)
+/* Loads every PT_LOAD segment, for both ELF classes */
+static void load_segments(const uint8_t *file_base,
+                          size_t file_size,
+                          elf_info_t *info)
 {
-    const Elf32_Ehdr *ehdr = (const Elf32_Ehdr *)file_base;
-    const Elf32_Phdr *phdrs;
+    ehdr_t eh;
+    size_t phdr_size;
+    int w;      /* hex digits of the addresses in the log: 8 or 16 */
 
-    if (file_size < sizeof(Elf32_Ehdr)) {
-        rtems_panic("ELF32 header exceeds file size");
+    get_ehdr(file_base, file_size, &eh);
+    phdr_size = eh.bits == 32 ? sizeof(Elf32_Phdr) : sizeof(Elf64_Phdr);
+    w = (int)eh.bits / 4;
+
+    if (eh.machine != EM_RISCV) {
+        rtems_panic("ELF%u machine %u is not RISC-V", eh.bits, (unsigned)eh.machine);
     }
 
-    if (ehdr->e_machine != EM_RISCV) {
-        rtems_panic("ELF32 machine %u is not RISC-V", (unsigned)ehdr->e_machine);
+    if (eh.phnum > 0 && eh.phentsize != phdr_size) {
+        rtems_panic("ELF%u unexpected program header size %u",
+                    eh.bits, (unsigned)eh.phentsize);
     }
 
-    if (ehdr->e_phnum > 0 && ehdr->e_phentsize != sizeof(Elf32_Phdr)) {
-        rtems_panic("ELF32 unexpected program header size %u",
-                    (unsigned)ehdr->e_phentsize);
+    if (!range_ok(eh.phoff, (uint64_t)eh.phnum * phdr_size, file_size)) {
+        rtems_panic("ELF%u program header table exceeds file size", eh.bits);
     }
 
-    if (!range_ok(ehdr->e_phoff,
-                  (uint64_t)ehdr->e_phnum * sizeof(Elf32_Phdr), file_size)) {
-        rtems_panic("ELF32 program header table exceeds file size");
-    }
+    info->entry = eh.entry;
+    info->is_32 = eh.bits == 32;
 
-    phdrs = (const Elf32_Phdr *)(file_base + ehdr->e_phoff);
-    info->entry = ehdr->e_entry;
-    info->is_32 = 1;
+    for (unsigned i = 0; i < eh.phnum; ++i) {
+        phdr_t seg;
 
-    for (int i = 0; i < ehdr->e_phnum; ++i) {
-        const Elf32_Phdr *seg = &phdrs[i];
-
-        if (seg->p_type != PT_LOAD || seg->p_memsz == 0) {
+        get_phdr(file_base, &eh, i, &seg);
+        if (seg.type != PT_LOAD || seg.memsz == 0) {
             continue;
         }
 
-        if (!range_ok(seg->p_offset, seg->p_filesz, file_size)) {
-            rtems_panic("ELF32 segment %d exceeds file size", i);
+        if (!range_ok(seg.offset, seg.filesz, file_size)) {
+            rtems_panic("ELF%u segment %u exceeds file size", eh.bits, i);
         }
 
-        printf("[ELF32] LOAD %d: off=0x%08" PRIx32
-               " paddr=0x%08" PRIx32
-               " filesz=0x%08" PRIx32
-               " memsz=0x%08" PRIx32 "\n",
-               i,
-               seg->p_offset,
-               seg->p_paddr,
-               seg->p_filesz,
-               seg->p_memsz);
+        printf("[ELF%u] LOAD %u: off=0x%0*" PRIx64
+               " paddr=0x%0*" PRIx64
+               " filesz=0x%0*" PRIx64
+               " memsz=0x%0*" PRIx64 "\n",
+               eh.bits, i,
+               w, seg.offset,
+               w, seg.paddr,
+               w, seg.filesz,
+               w, seg.memsz);
 
-        load_segment(seg->p_paddr, file_base + seg->p_offset,
-                     seg->p_filesz, seg->p_memsz);
-    }
-}
-
-static void load_elf64_segments(const uint8_t *file_base,
-                                size_t file_size,
-                                elf_info_t *info)
-{
-    const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)file_base;
-    const Elf64_Phdr *phdrs;
-
-    if (file_size < sizeof(Elf64_Ehdr)) {
-        rtems_panic("ELF64 header exceeds file size");
-    }
-
-    if (ehdr->e_machine != EM_RISCV) {
-        rtems_panic("ELF64 machine %u is not RISC-V", (unsigned)ehdr->e_machine);
-    }
-
-    if (ehdr->e_phnum > 0 && ehdr->e_phentsize != sizeof(Elf64_Phdr)) {
-        rtems_panic("ELF64 unexpected program header size %u",
-                    (unsigned)ehdr->e_phentsize);
-    }
-
-    if (!range_ok(ehdr->e_phoff,
-                  (uint64_t)ehdr->e_phnum * sizeof(Elf64_Phdr), file_size)) {
-        rtems_panic("ELF64 program header table exceeds file size");
-    }
-
-    phdrs = (const Elf64_Phdr *)(file_base + ehdr->e_phoff);
-    info->entry = ehdr->e_entry;
-    info->is_32 = 0;
-
-    for (int i = 0; i < ehdr->e_phnum; ++i) {
-        const Elf64_Phdr *seg = &phdrs[i];
-
-        if (seg->p_type != PT_LOAD || seg->p_memsz == 0) {
-            continue;
-        }
-
-        if (!range_ok(seg->p_offset, seg->p_filesz, file_size)) {
-            rtems_panic("ELF64 segment %d exceeds file size", i);
-        }
-
-        printf("[ELF64] LOAD %d: off=0x%016" PRIx64
-               " paddr=0x%016" PRIx64
-               " filesz=0x%016" PRIx64
-               " memsz=0x%016" PRIx64 "\n",
-               i,
-               seg->p_offset,
-               seg->p_paddr,
-               seg->p_filesz,
-               seg->p_memsz);
-
-        load_segment(seg->p_paddr, file_base + seg->p_offset,
-                     seg->p_filesz, seg->p_memsz);
+        load_segment(seg.paddr, file_base + seg.offset, seg.filesz, seg.memsz);
     }
 }
 
@@ -197,18 +275,9 @@ void load_elf_from_memory(const uint8_t *file_base,
                     "(make rtems MAGIA_ELF=/path/to/elf)");
     }
 
-    if (file_size < EI_NIDENT) {
-        rtems_panic("ELF image too small");
-    }
+    check_image(file_base, file_size);
+    load_segments(file_base, file_size, info);
 
-    check_elf_ident(file_base);
-
-    if (file_base[EI_CLASS] == ELFCLASS32) {
-        load_elf32_segments(file_base, file_size, info);
-    } else {
-        load_elf64_segments(file_base, file_size, info);
-    }
-    
     /* make visible the loaded segments */
     write_fence();
     
@@ -241,97 +310,44 @@ int magia_elf_check_machine(const uint8_t *file_base,
                             size_t file_size,
                             uint16_t machine)
 {
-    uint16_t e_machine;
+    ehdr_t eh;
 
+    // as check_image(), but returning 0 instead of panicking
     if (file_base == NULL || file_size < EI_NIDENT ||
         memcmp(file_base, ELFMAG, SELFMAG) != 0 ||
         file_base[EI_DATA] != ELFDATA2LSB) {
         return 0;
     }
 
-    if (file_base[EI_CLASS] == ELFCLASS32) {
-        if (file_size < sizeof(Elf32_Ehdr)) {
-            return 0;
-        }
-        e_machine = ((const Elf32_Ehdr *)file_base)->e_machine;
-    } else if (file_base[EI_CLASS] == ELFCLASS64) {
-        if (file_size < sizeof(Elf64_Ehdr)) {
-            return 0;
-        }
-        e_machine = ((const Elf64_Ehdr *)file_base)->e_machine;
-    } else {
-        return 0;
-    }
-
-    return e_machine == machine;
+    return read_ehdr(file_base, file_size, &eh) == 0 && eh.machine == machine;
 }
 
 /* ------------------------------------------------------------------------ */
 /* Symbol table                                                              */
 /* ------------------------------------------------------------------------ */
-
-/*
- * Section header fields needed to walk .symtab, independent of the ELF class.
- * The class was already validated by check_elf_ident().
- */
-typedef struct {
-    uint32_t type;
-    uint32_t link;
-    uint64_t offset;
-    uint64_t size;
-    uint64_t entsize;
-} shdr_t;
-
-static void check_image(const uint8_t *file_base, size_t file_size)
-{
-    if (file_size < EI_NIDENT) {
-        rtems_panic("ELF image too small");
-    }
-
-    check_elf_ident(file_base);
-}
-
 static uint16_t elf_shnum(const uint8_t *file_base, size_t file_size,
                           uint64_t *shoff)
 {
-    uint16_t shnum, shentsize;
+    ehdr_t eh;
     size_t shdr_size;
 
-    if (file_base[EI_CLASS] == ELFCLASS32) {
-        const Elf32_Ehdr *ehdr = (const Elf32_Ehdr *)file_base;
+    get_ehdr(file_base, file_size, &eh);
+    shdr_size = eh.bits == 32 ? sizeof(Elf32_Shdr) : sizeof(Elf64_Shdr);
+    *shoff = eh.shoff;
 
-        if (file_size < sizeof(*ehdr)) {
-            rtems_panic("ELF32 header exceeds file size");
-        }
-        *shoff = ehdr->e_shoff;
-        shnum = ehdr->e_shnum;
-        shentsize = ehdr->e_shentsize;
-        shdr_size = sizeof(Elf32_Shdr);
-    } else {
-        const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)file_base;
-
-        if (file_size < sizeof(*ehdr)) {
-            rtems_panic("ELF64 header exceeds file size");
-        }
-        *shoff = ehdr->e_shoff;
-        shnum = ehdr->e_shnum;
-        shentsize = ehdr->e_shentsize;
-        shdr_size = sizeof(Elf64_Shdr);
-    }
-
-    if (shnum == 0) {
+    if (eh.shnum == 0) {
         return 0;
     }
 
-    if (shentsize != shdr_size) {
-        rtems_panic("ELF unexpected section header size %u", (unsigned)shentsize);
+    if (eh.shentsize != shdr_size) {
+        rtems_panic("ELF unexpected section header size %u", (unsigned)eh.shentsize);
     }
 
-    if (!range_ok(*shoff, (uint64_t)shnum * shdr_size, file_size)) {
+    if (!range_ok(*shoff, (uint64_t)eh.shnum * shdr_size, file_size)) {
         rtems_panic("ELF section header table exceeds file size");
     }
 
-    return shnum;
+    return eh.shnum;
 }
 
 static void get_shdr(const uint8_t *file_base, uint64_t shoff, unsigned i,
@@ -465,11 +481,6 @@ int magia_elf_foreach_symbol(const uint8_t *file_base,
     return 0;
 }
 
-typedef struct {
-    const char *name;
-    magia_elf_sym_t *sym;
-} find_by_name_t;
-
 static int visit_find_by_name(const magia_elf_sym_t *sym, void *arg)
 {
     find_by_name_t *ctx = arg;
@@ -492,13 +503,6 @@ int magia_elf_find_symbol(const uint8_t *file_base,
     return magia_elf_foreach_symbol(file_base, file_size,
                                     visit_find_by_name, &ctx) == 1 ? 0 : -1;
 }
-
-typedef struct {
-    const char *suffix;
-    size_t suffix_len;
-    magia_elf_sym_t *sym;
-    unsigned matches;
-} find_kernel_t;
 
 static int visit_find_kernel(const magia_elf_sym_t *sym, void *arg)
 {
@@ -555,28 +559,4 @@ int print_omp_kernel(const magia_elf_sym_t *sym, void *arg)
                 sizeof(MAGIA_OMP_KERNEL_PREFIX) - 1) == 0)
         printf("[host]   0x%08" PRIx32 " %s\n", (uint32_t)sym->value, sym->name);
     return 0;
-}
-
-kernel_t find_kernel(const uint8_t *file_base,
-                     size_t file_size,
-                     const char *suffix)
-{
-    magia_elf_sym_t sym;
-    int rv = magia_elf_find_omp_kernel(file_base, file_size, suffix, &sym);
-
-    if (rv == -2) {
-        printf("[host] ambiguous kernel: %s\n", suffix);
-        return NULL;
-    }
-    if (rv != 0) {
-        printf("[host] kernel not found: %s\n", suffix);
-        return NULL;
-    }
-    // MAGIA is 32-bit and the kernel must lie in the loaded L2
-    if (sym.value < MAGIA_L2_START || sym.value > MAGIA_L2_END) {
-        printf("[host] kernel %s at 0x%" PRIx64 " outside the MAGIA L2\n",
-               sym.name, sym.value);
-        return NULL;
-    }
-    return (kernel_t)(uintptr_t)sym.value;
 }

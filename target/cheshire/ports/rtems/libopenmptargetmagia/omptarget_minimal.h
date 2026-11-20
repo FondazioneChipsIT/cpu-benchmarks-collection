@@ -23,6 +23,17 @@ extern "C" {
 #define OFFLOAD_SUCCESS (0)
 #define OFFLOAD_FAIL    (~0)
 
+/*
+ * Device numbers of the MAGIA plugin, as HERODEV_SVM / HERODEV_MEMCPY in the
+ * HERO plugin: the same MAGIA, two ways of handling the mapped data.
+ *   MAGIADEV_SHMMEM  zero copy: the host buffers must lie in the L2 section
+ *                    .omp_offloaded_buffer_L2 (MAGIA_OMP_SHARED, magia_api.h),
+ *                    otherwise data_alloc / submit / retrieve fail;
+ *   MAGIADEV_MEMCPY  copies to / from the L2 heap (device(1) in the HERO apps).
+ */
+#define MAGIADEV_SHMMEM (0)
+#define MAGIADEV_MEMCPY (1)
+
 /// This struct is a record of an entry point or global. For a function
 /// entry point the size is expected to be zero
 struct __tgt_offload_entry {

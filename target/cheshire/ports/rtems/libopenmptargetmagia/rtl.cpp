@@ -46,7 +46,14 @@
 #include <inttypes.h>
 #include <stdio.h>
 
-#define NUMBER_OF_DEVICES (1)
+/*
+ * As in HERO (HERODEV_SVM 0, HERODEV_MEMCPY 1): two devices on the same MAGIA,
+ * MAGIADEV_SHMMEM and MAGIADEV_MEMCPY (omptarget_minimal.h). They differ only
+ * in data_alloc / delete / submit / retrieve; mailboxes, L2 heap, argument
+ * buffer and loaded ELF are shared: set up by the first init_device, released
+ * (STOP) by the last deinit_device.
+ */
+#define NUMBER_OF_DEVICES (2)
 
 /* ELF e_machine of MAGIA (EM_RISCV), as checked by the HERO plugin */
 #define MAGIA_ELF_MACHINE (243)
@@ -75,17 +82,48 @@
  */
 #define MAX_ENTRIES 64u
 
+// Argument buffer in the L2 heap, used by both devices: MAGIA reads the
+// argument addresses from the L2, whatever the device
 static uintptr_t dev_arg_buf;
 
 static __tgt_offload_entry device_entries[MAX_ENTRIES];
 static __tgt_target_table  target_table;
 static bool magia_started;   // the MAGIA fetch enable can be raised only once
+static const void *loaded_image;   // ImageStart of the ELF running on MAGIA
+static size_t loaded_entries;      // and its number of entries
+
+static bool device_initialized[NUMBER_OF_DEVICES];
 
 static bool valid_device(int32_t device_id)
 {
   if (device_id >= 0 && device_id < NUMBER_OF_DEVICES)
     return true;
   printf("[host] FAIL: invalid device id %" PRId32 "\n", device_id);
+  return false;
+}
+
+static bool any_device_initialized(void)
+{
+  for (int32_t i = 0; i < NUMBER_OF_DEVICES; i++)
+    if (device_initialized[i])
+      return true;
+  return false;
+}
+
+/*
+ * MAGIADEV_SHMMEM: the device works on the host buffer itself, which must lie
+ * whole in .omp_offloaded_buffer_L2. Used by submit / retrieve, where
+ * libomptarget passes the pointer returned by data_alloc (hst_ptr itself).
+ * No fence needed: the L2 is never cached, and the START written in the h2a
+ * ring after a fence w,w (ringbuf.h) orders the host stores before the kernel.
+ */
+static bool shmmem_buffer_ok(const void *tgt_ptr, const void *hst_ptr, int64_t size)
+{
+  if (tgt_ptr == hst_ptr && magia_is_shared(hst_ptr, (uint64_t)size))
+    return true;
+  printf("[host] FAIL: SHMMEM: host %p / target %p (%" PRId64 " bytes) "
+         "not the same buffer in .omp_offloaded_buffer_L2\n",
+         hst_ptr, tgt_ptr, size);
   return false;
 }
 
@@ -159,13 +197,18 @@ int32_t __tgt_rtl_init_device(int32_t device_id) {
 
   if (!valid_device(device_id))
     return OFFLOAD_FAIL;
+  if (device_initialized[device_id])   // nothing more to do
+    return OFFLOAD_SUCCESS;
 
-  magia_dev_init();
+  // In HERO: init_hero_device() once, guarded by "initialized"
+  if (!any_device_initialized()) {
+    magia_dev_init();
+    dev_arg_buf = data_alloc(ARG_BUF_SIZE * sizeof(uint64_t));
+    if (dev_arg_buf == 0)
+      return OFFLOAD_FAIL;
+  }
 
-  dev_arg_buf = data_alloc(ARG_BUF_SIZE * sizeof(uint64_t));
-  if (dev_arg_buf == 0)
-    return OFFLOAD_FAIL;
-
+  device_initialized[device_id] = true;
   return OFFLOAD_SUCCESS;
 }
 
@@ -180,12 +223,8 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     printf("[host] FAIL: the image is not a RISC-V ELF\n");
     return nullptr;
   }
-  if (dev_arg_buf == 0) {        // contract: mailboxes BEFORE the fetch enable
+  if (!device_initialized[device_id]) {   // contract: mailboxes BEFORE the fetch enable
     printf("[host] FAIL: load_binary before init_device\n");
-    return nullptr;
-  }
-  if (magia_started) {           // one MAGIA, one ELF
-    printf("[host] FAIL: MAGIA already running\n");
     return nullptr;
   }
 
@@ -197,6 +236,17 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
       n > MAX_ENTRIES) {
     printf("[host] FAIL: invalid entry table (%zu entries, maximum %u)\n",
            n, MAX_ENTRIES);
+    return nullptr;
+  }
+
+  // One MAGIA, one ELF: libomptarget loads the image once per device, the
+  // second device gets the table of the ELF already running
+  if (magia_started) {
+    if (image->ImageStart == loaded_image && n == loaded_entries) {
+      printf("[host] device %" PRId32 ": MAGIA ELF already loaded\n", device_id);
+      return &target_table;
+    }
+    printf("[host] FAIL: MAGIA already running another image\n");
     return nullptr;
   }
 
@@ -221,6 +271,8 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
   load_elf_from_memory(elf, size, &info);
   set_entry_point_and_enable_fetch(&info);
   magia_started = true;
+  loaded_image = image->ImageStart;
+  loaded_entries = n;
 
   // 3. Device table, same order as the host entries
   target_table.EntriesBegin = device_entries;
@@ -232,19 +284,39 @@ int32_t __tgt_rtl_deinit_device(int32_t device_id) {
 
   if (!valid_device(device_id))
     return OFFLOAD_FAIL;
+  if (!device_initialized[device_id]) {
+    printf("[host] FAIL: deinit of device %" PRId32 " not initialized\n", device_id);
+    return OFFLOAD_FAIL;
+  }
+
+  device_initialized[device_id] = false;
+  if (any_device_initialized())   // MAGIA still used by the other device
+    return OFFLOAD_SUCCESS;
 
   dev_arg_buf = 0;
   magia_started = false;
+  loaded_image = nullptr;
+  loaded_entries = 0;
   return magia_dev_stop(OFL_MBOX_TIMEOUT_MS) == 0 ? OFFLOAD_SUCCESS : OFFLOAD_FAIL;
 }
 
 void *__tgt_rtl_data_alloc(int32_t device_id, int64_t size, void *hst_ptr, int32_t kind) {
 
-  (void)hst_ptr;
-  (void)kind;   // only one kind of memory: the L2 heap
+  (void)kind;   // only one kind of memory: the L2
 
   if (!valid_device(device_id) || !valid_size(size))
     return nullptr;
+
+  if (device_id == MAGIADEV_SHMMEM) {
+    // In HERO (SVM): ptr = hst_ptr. Here only if the device can see it.
+    // hst_ptr == nullptr (omp_target_alloc) is not supported.
+    if (hst_ptr == nullptr || !magia_is_shared(hst_ptr, (uint64_t)size)) {
+      printf("[host] SHMMEM: refused host buffer %p (%" PRId64 " bytes), not "
+             "in .omp_offloaded_buffer_L2\n", hst_ptr, size);
+      return nullptr;
+    }
+    return hst_ptr;
+  }
 
   return (void *)data_alloc((uint32_t)size);   // 0 (heap exhausted) -> nullptr
 }
@@ -253,6 +325,16 @@ int32_t __tgt_rtl_data_delete(int32_t device_id, void *tgt_ptr) {
 
   if (!valid_device(device_id))
     return OFFLOAD_FAIL;
+
+  if (device_id == MAGIADEV_SHMMEM) {
+    // nothing was allocated: tgt_ptr is the host buffer
+    if (!magia_is_shared(tgt_ptr, 0)) {
+      printf("[host] FAIL: SHMMEM: delete of %p, not in "
+             ".omp_offloaded_buffer_L2\n", tgt_ptr);
+      return OFFLOAD_FAIL;
+    }
+    return OFFLOAD_SUCCESS;
+  }
 
   return data_free((uintptr_t)tgt_ptr) == 0 ? OFFLOAD_SUCCESS : OFFLOAD_FAIL;
 }
@@ -263,6 +345,9 @@ int32_t __tgt_rtl_data_submit(int32_t device_id, void *tgt_ptr, void *hst_ptr,
   if (!valid_device(device_id) || !valid_size(size))
     return OFFLOAD_FAIL;
 
+  if (device_id == MAGIADEV_SHMMEM)   // no copy: the device reads hst_ptr
+    return shmmem_buffer_ok(tgt_ptr, hst_ptr, size) ? OFFLOAD_SUCCESS : OFFLOAD_FAIL;
+
   data_submit((uintptr_t)tgt_ptr, hst_ptr, (uint32_t)size);
   return OFFLOAD_SUCCESS;
 }
@@ -272,6 +357,9 @@ int32_t __tgt_rtl_data_retrieve(int32_t device_id, void *hst_ptr, void *tgt_ptr,
 
   if (!valid_device(device_id) || !valid_size(size))
     return OFFLOAD_FAIL;
+
+  if (device_id == MAGIADEV_SHMMEM)   // no copy: the device wrote hst_ptr
+    return shmmem_buffer_ok(tgt_ptr, hst_ptr, size) ? OFFLOAD_SUCCESS : OFFLOAD_FAIL;
 
   data_retrieve(hst_ptr, (uintptr_t)tgt_ptr, (uint32_t)size);
   return OFFLOAD_SUCCESS;
@@ -301,8 +389,9 @@ int32_t __tgt_rtl_run_target_team_region(int32_t device_id, void *tgt_entry_ptr,
 
   if (!valid_device(device_id))
     return OFFLOAD_FAIL;
-  if (dev_arg_buf == 0) {
-    printf("[host] FAIL: device %" PRId32 " not initialized\n", device_id);
+  if (!device_initialized[device_id] || !magia_started) {
+    printf("[host] FAIL: device %" PRId32 " not initialized or ELF not loaded\n",
+           device_id);
     return OFFLOAD_FAIL;
   }
   if (arg_num < 0 || (uint32_t)arg_num > ARG_BUF_SIZE) {

@@ -17,8 +17,10 @@
 //
 // Riccardo: this file is the contract to share with the RTEMS host. With UMA
 // memory (QEMU + GVSoC) host and MAGIA see the L2 at the SAME addresses, so
-// these values hold unchanged on the host too. Still to be verified that the
-// whole 0xC000_0000 - 0xC100_0000 range is shared.
+// these values hold unchanged on the host too. The launcher
+// (~/gvsoc/launch_qemu_cheshire_gvsoc_magia_with_elf_loader.py) backs the
+// whole QEMU guest RAM (2G by default) with one shared memfd that GVSoC maps
+// as the L2, so both the offload structures and the OFL_SHM window are shared.
 
 #pragma once
 #include <stdint.h>
@@ -54,6 +56,13 @@
 // ---- Heap for the data buffers (map) and the argument buffers ---------------
 #define OFL_HEAP_BASE    0xC0010000u
 #define OFL_HEAP_END     0xC1000000u
+
+// ---- Zero-copy window (OpenMP device MAGIADEV_SHMMEM) -----------------------
+// Holds the RTEMS output section .omp_offloaded_buffer_L2 (NOLOAD), where the
+// host places the buffers shared with MAGIA (MAGIA_OMP_SHARED, magia_api.h).
+// Same values as the L2_OMP_SHM region of ports/rtems/linkcmds.yml.
+#define OFL_SHM_BASE     0xC1000000u
+#define OFL_SHM_END      0xCC000000u   // MAGIA code starts here
 
 // ---- Protocol: identical to HERO (hero_api.h / sw_mailbox.h) ----------------
 #define MBOX_DEVICE_START  (0x02U)   // host->dev: START, &function, &argbuf, 0

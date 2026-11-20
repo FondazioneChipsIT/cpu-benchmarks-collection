@@ -41,6 +41,25 @@ uintptr_t data_alloc(uint32_t size);
  */
 int data_free(uintptr_t dev);
 
+/*
+ * ZERO-COPY BUFFERS. In HERO the SVM device shares the whole host memory
+ * through the IOMMU; MAGIA sees only the L2, so the host must place the
+ * shared buffers in the L2 output section .omp_offloaded_buffer_L2
+ * (ports/rtems/linkcmds.yml, inside [OFL_SHM_BASE, OFL_SHM_END)), e.g.:
+ *
+ *   static int32_t A[N] MAGIA_OMP_SHARED;
+ *
+ * Only for static or global variables. The section is NOLOAD: initializers
+ * are ignored and the content is undefined at boot, so initialize in code.
+ */
+#define MAGIA_OMP_SHARED __attribute__((section(".omp_offloaded_buffer_L2")))
+
+/*
+ * Returns 1 if [ptr, ptr + size) lies inside .omp_offloaded_buffer_L2 (for
+ * size 0: if ptr lies in [begin, end]), 0 otherwise.
+ */
+int magia_is_shared(const void *ptr, uint64_t size);
+
 /* HOST -> DEVICE COPY. In HERO: GOMP_OFFLOAD_host2dev. */
 void data_submit(uintptr_t dev, const void *host, uint32_t size);
 

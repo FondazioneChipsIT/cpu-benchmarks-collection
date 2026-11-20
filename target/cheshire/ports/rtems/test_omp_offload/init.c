@@ -47,8 +47,10 @@
 /*
  * Test selection: it must match the regions() of the kernels_omp.c the MAGIA
  * ELF was built from (the check in Init() refuses a different region count).
- *   defined:   vector sum, 1 region   map(to: A, B) map(from: result)
- *   commented: previous test, 3 regions   nop, map(to), map(tofrom)
+ *   defined:   vector sum, 1 region   map(to: A, B) map(from: result),
+ *              run on MAGIADEV_MEMCPY and then on MAGIADEV_SHMMEM (zero copy)
+ *   commented: previous test, 3 regions   nop, map(to), map(tofrom),
+ *              run on MAGIADEV_MEMCPY
  */
 //#define TEST_OMP_SUMVEC
 
@@ -63,6 +65,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <rtems/magia/omptarget_minimal.h>
+#include <rtems/magia/magia_api.h>   /* MAGIA_OMP_SHARED */
 
 /* Generated at build time from the MAGIA ELF by gen_magia_omp_entries.py */
 #include "magia_omp_entries.h"
@@ -148,7 +151,15 @@ enum { K_NOP, K_MAP_TO, K_MAP_TOFROM, K_USED };  // no data, map(to), map(tofrom
 // and libmagiaelfloader (ELF check, symbols, load, fetch enable).
 // ===========================================================================
 
-#define DEVICE_ID 0
+// Devices used by the test, initialized and loaded in this order, released
+// in reverse order (the last deinit sends the STOP)
+#ifdef TEST_OMP_SUMVEC
+static const int32_t devices[] = { MAGIADEV_MEMCPY, MAGIADEV_SHMMEM };
+#else
+#define DEVICE_ID MAGIADEV_MEMCPY
+static const int32_t devices[] = { DEVICE_ID };
+#endif
+#define DEVICES_USED ( sizeof( devices ) / sizeof( devices[ 0 ] ) )
 
 // Device table returned by __tgt_rtl_load_binary, same order as host_entries
 static struct __tgt_target_table *table;
@@ -165,48 +176,116 @@ static struct __tgt_target_table *table;
 #ifdef TEST_OMP_SUMVEC
 #define N 128
 
-static int regions(void)
+// MAGIADEV_SHMMEM buffers: in the L2 section .omp_offloaded_buffer_L2, seen
+// by MAGIA at the same address. NOLOAD: initialized in code.
+static int32_t shm_A[N] MAGIA_OMP_SHARED;
+static int32_t shm_B[N] MAGIA_OMP_SHARED;
+static int32_t shm_result MAGIA_OMP_SHARED;
+
+// A[i] = i, B[i] = 10 * i; returns the expected sum
+static int32_t fill_inputs(int32_t *A, int32_t *B)
 {
-    int32_t A[N];   /* input */
-    int32_t B[N];   /* input */
-    int32_t result = 0;
     int32_t expected = 0;
 
-    /* A[i] = i, B[i] = 10 * i */
     for (int i = 0; i < N; i++) {
         A[i] = i;
         B[i] = 10 * i;
         expected += A[i] + B[i];
     }
+    return expected;
+}
 
-    // #pragma omp target device(1) map(to: A, B) map(from: result)
-    // Kernel arguments, in clang's order: A, B, result
-    // (offload_sizes 512, 512, 4; offload_maptypes 33 to, 33 to, 34 from).
-    // device(1) is the device number of a clang-compiled host: here the plugin
-    // has a single device, DEVICE_ID.
-    {
-        void *ptrs[3] = { __tgt_rtl_data_alloc(DEVICE_ID, sizeof A, A, 0),
-                          __tgt_rtl_data_alloc(DEVICE_ID, sizeof B, B, 0),
-                          __tgt_rtl_data_alloc(DEVICE_ID, sizeof result, &result, 0) };
-        ptrdiff_t offs[3] = { 0, 0, 0 };
-        if (ptrs[0] == NULL || ptrs[1] == NULL || ptrs[2] == NULL ||
-            // "to": copy A and B into L2 (result is "from": not copied in)
-            __tgt_rtl_data_submit(DEVICE_ID, ptrs[0], A, sizeof A) ||
-            __tgt_rtl_data_submit(DEVICE_ID, ptrs[1], B, sizeof B) ||
-            __tgt_rtl_run_target_region(DEVICE_ID, ENTRY(K_SUM), ptrs, offs, 3) ||
-            // "from": copy result back to the host
-            __tgt_rtl_data_retrieve(DEVICE_ID, &result, ptrs[2], sizeof result) ||
-            __tgt_rtl_data_delete(DEVICE_ID, ptrs[0]) ||
-            __tgt_rtl_data_delete(DEVICE_ID, ptrs[1]) ||
-            __tgt_rtl_data_delete(DEVICE_ID, ptrs[2]))
-            return -1;
-    }
+// #pragma omp target device(dev) map(to: A[0:N], B[0:N]) map(from: result)
+// Kernel arguments, in clang's order: A, B, result
+// (offload_sizes 512, 512, 4; offload_maptypes 33 to, 33 to, 34 from).
+// The calls are the same for both devices, as libomptarget makes them: only
+// the plugin behaves differently (copies for MEMCPY, none for SHMMEM).
+// Fills ptrs with the target pointers, to check the zero copy.
+static int sum_region(int32_t dev, int32_t *A, int32_t *B, int32_t *result,
+                      void *ptrs[3])
+{
+    const int64_t vsize = N * sizeof(int32_t);
+    ptrdiff_t offs[3] = { 0, 0, 0 };
 
-    printf("[host] result = %" PRId32 " (expected %" PRId32 ")\n", result, expected);
+    ptrs[0] = __tgt_rtl_data_alloc(dev, vsize, A, 0);
+    ptrs[1] = __tgt_rtl_data_alloc(dev, vsize, B, 0);
+    ptrs[2] = __tgt_rtl_data_alloc(dev, sizeof *result, result, 0);
+    if (ptrs[0] == NULL || ptrs[1] == NULL || ptrs[2] == NULL ||
+        // "to": A and B to the device (result is "from": not copied in)
+        __tgt_rtl_data_submit(dev, ptrs[0], A, vsize) ||
+        __tgt_rtl_data_submit(dev, ptrs[1], B, vsize) ||
+        __tgt_rtl_run_target_region(dev, ENTRY(K_SUM), ptrs, offs, 3) ||
+        // "from": result back to the host
+        __tgt_rtl_data_retrieve(dev, result, ptrs[2], sizeof *result) ||
+        __tgt_rtl_data_delete(dev, ptrs[0]) ||
+        __tgt_rtl_data_delete(dev, ptrs[1]) ||
+        __tgt_rtl_data_delete(dev, ptrs[2]))
+        return -1;
+    return 0;
+}
+
+static int check_sum(const char *dev_name, int32_t result, int32_t expected)
+{
+    printf("[host] %s: result = %" PRId32 " (expected %" PRId32 ")\n",
+           dev_name, result, expected);
     if (result != expected) {
-        printf("[host] FAIL: wrong sum\n");
+        printf("[host] FAIL: %s: wrong sum\n", dev_name);
         return -1;
     }
+    return 0;
+}
+
+static int regions(void)
+{
+    void *ptrs[3];
+    
+    // 1. MAGIADEV_SHMMEM: buffers in .omp_offloaded_buffer_L2, no copies.
+    //    shm_result is set to a wrong value: only MAGIA can fix it, since
+    //    retrieve copies nothing.
+    {
+        int32_t expected = fill_inputs(shm_A, shm_B);
+
+        shm_result = -1;
+        printf("[host] --- MAGIADEV_SHMMEM ---\n");
+        printf("[host] SHMMEM: A at %p, B at %p, result at %p\n",
+               (void *)shm_A, (void *)shm_B, (void *)&shm_result);
+        if (sum_region(MAGIADEV_SHMMEM, shm_A, shm_B, &shm_result, ptrs) ||
+            check_sum("SHMMEM", shm_result, expected))
+            return -1;
+        if (ptrs[0] != (void *)shm_A || ptrs[1] != (void *)shm_B ||
+            ptrs[2] != (void *)&shm_result) {
+            printf("[host] FAIL: SHMMEM: target pointers differ from host ones\n");
+            return -1;
+        }
+    }
+
+    // 2. MAGIADEV_MEMCPY (device(1) as in the HERO apps): buffers on the
+    //    RTEMS stack, copied to / from the L2 heap
+    {
+        int32_t A[N];
+        int32_t B[N];
+        int32_t result = 0;
+        int32_t expected = fill_inputs(A, B);
+
+        printf("[host] --- MAGIADEV_MEMCPY ---\n");
+        if (sum_region(MAGIADEV_MEMCPY, A, B, &result, ptrs) ||
+            check_sum("MEMCPY", result, expected))
+            return -1;
+        if (ptrs[0] == (void *)A) {
+            printf("[host] FAIL: MEMCPY: no device copy of A\n");
+            return -1;
+        }
+
+        // Negative check: a stack buffer is not visible to MAGIA, SHMMEM
+        //    must refuse it (the plugin prints the reason)
+        printf("[host] --- MAGIADEV_SHMMEM with a stack buffer: must be refused ---\n");
+        if (__tgt_rtl_data_alloc(MAGIADEV_SHMMEM, sizeof A, A, 0) != NULL) {
+            printf("[host] FAIL: SHMMEM accepted a buffer outside the L2\n");
+            return -1;
+        }
+        printf("[host] SHMMEM: stack buffer refused, as expected\n");
+    }
+
     return 0;
 }
 #else  /* !TEST_OMP_SUMVEC: previous test */
@@ -299,28 +378,37 @@ static rtems_task Init( rtems_task_argument ignored )
   /*
    * Mailboxes and "ready" cell first, MAGIA fetch enable (in load_binary)
    * last (contract in offload_layout.h): MAGIA starts only with the shared
-   * memory already set up and cannot see a stale ready flag.
+   * memory already set up and cannot see a stale ready flag. The first
+   * init_device sets everything up, the next ones only enable their device.
    */
-  if ( __tgt_rtl_init_device( DEVICE_ID ) != OFFLOAD_SUCCESS ) {
-    /* MAGIA not started yet: no fetch enable, so no STOP needed */
-    printf( "[host] FAIL: device init failed\n" );
-    printf( "[host] TEST FAIL\n" );
-    rtems_test_exit( 1 );
+  size_t initialized = 0;
+  while ( initialized < DEVICES_USED &&
+          __tgt_rtl_init_device( devices[ initialized ] ) == OFFLOAD_SUCCESS ) {
+    initialized++;
   }
 
   /*
    * As in HERO: resolve all the entries first (all or nothing), then load the
-   * ELF and enable the MAGIA fetch. On failure MAGIA is never started: deinit
-   * writes a STOP nobody reads (harmless, the h2a ring is empty) and
-   * invalidates the "ready" cell.
+   * ELF and enable the MAGIA fetch. libomptarget loads the image once per
+   * device: the first load starts MAGIA, the next ones must return the same
+   * table. On failure MAGIA may never have started: the last deinit writes a
+   * STOP nobody reads (harmless, the h2a ring is empty) and invalidates the
+   * "ready" cell.
    */
-  table = __tgt_rtl_load_binary( DEVICE_ID, &image );
-  if ( table == NULL ) {
-    __tgt_rtl_deinit_device( DEVICE_ID );
-    /* no TEST_END(): "*** END OF TEST" means success for the RTEMS tester */
-    printf( "[host] FAIL: MAGIA ELF load aborted\n" );
-    printf( "[host] TEST FAIL\n" );
-    rtems_test_exit( 1 );
+  if ( initialized < DEVICES_USED ) {
+    printf( "[host] FAIL: init of device %" PRId32 " failed\n",
+            devices[ initialized ] );
+    errors = 1;
+  }
+  for ( size_t i = 0; errors == 0 && i < DEVICES_USED; i++ ) {
+    struct __tgt_target_table *t = __tgt_rtl_load_binary( devices[ i ], &image );
+
+    if ( t == NULL || ( table != NULL && t != table ) ) {
+      printf( "[host] FAIL: MAGIA ELF load on device %" PRId32 " aborted\n",
+              devices[ i ] );
+      errors = 1;
+    }
+    table = t;
   }
 
   /* Execute offloaded regions */
@@ -328,9 +416,15 @@ static rtems_task Init( rtems_task_argument ignored )
     errors = 1;
   }
 
-  /* Always STOP, also on failure, so that MAGIA leaves and GVSoC ends */
-  if ( __tgt_rtl_deinit_device( DEVICE_ID ) != OFFLOAD_SUCCESS ) {
-    errors = 1;
+  /*
+   * Always deinit, also on failure, so that MAGIA leaves and GVSoC ends:
+   * reverse order, the last one sends the STOP
+   */
+  while ( initialized > 0 ) {
+    initialized--;
+    if ( __tgt_rtl_deinit_device( devices[ initialized ] ) != OFFLOAD_SUCCESS ) {
+      errors = 1;
+    }
   }
 
   if ( errors != 0 ) {

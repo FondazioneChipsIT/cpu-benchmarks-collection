@@ -43,6 +43,20 @@ int data_free(uintptr_t dev)
     return 0;   // bump allocator: memory is reclaimed only by magia_dev_init()
 }
 
+/* Defined by ports/rtems/linkcmds.yml around .omp_offloaded_buffer_L2 */
+extern char __omp_offloaded_buffer_L2_begin[];
+extern char __omp_offloaded_buffer_L2_end[];
+
+int magia_is_shared(const void *ptr, uint64_t size)
+{
+    uintptr_t p = (uintptr_t)ptr;
+    uintptr_t begin = (uintptr_t)__omp_offloaded_buffer_L2_begin;
+    uintptr_t end = (uintptr_t)__omp_offloaded_buffer_L2_end;
+
+    // written as differences: no overflow for any ptr and size
+    return p >= begin && p <= end && size <= (uint64_t)(end - p);
+}
+
 void data_submit(uintptr_t dev, const void *host, uint32_t size)
 {
     for (uint32_t i = 0; i < size; i++)

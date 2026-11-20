@@ -300,22 +300,55 @@ int32_t __tgt_rtl_deinit_device(int32_t device_id) {
   return magia_dev_stop(OFL_MBOX_TIMEOUT_MS) == 0 ? OFFLOAD_SUCCESS : OFFLOAD_FAIL;
 }
 
-void *__tgt_rtl_data_alloc(int32_t device_id, int64_t size, void *hst_ptr, int32_t kind) {
+static const char *alloc_kind_name(int32_t kind)
+{
+  switch (kind) {
+  case TARGET_ALLOC_DEVICE:  return "DEVICE";
+  case TARGET_ALLOC_HOST:    return "HOST";
+  case TARGET_ALLOC_SHARED:  return "SHARED";
+  case TARGET_ALLOC_DEFAULT: return "DEFAULT";
+  default:                   return "unknown";
+  }
+}
 
-  (void)kind;   // only one kind of memory: the L2
+/*
+ * kind coherence check (HERO accepts only TARGET_ALLOC_DEFAULT):
+ *   MAGIADEV_SHMMEM  DEFAULT or SHARED: memory seen by host and device
+ *   MAGIADEV_MEMCPY  DEFAULT or DEVICE: device memory (L2 heap)
+ * Note: private / firstprivate arguments also come as DEFAULT; on SHMMEM a
+ * private buffer would alias the host one, and the firstprivate buffer of
+ * libomptarget is outside .omp_offloaded_buffer_L2: not usable on SHMMEM.
+ */
+void *__tgt_rtl_data_alloc(int32_t device_id, int64_t size, void *hst_ptr, int32_t kind) {
 
   if (!valid_device(device_id) || !valid_size(size))
     return nullptr;
 
   if (device_id == MAGIADEV_SHMMEM) {
+    if (kind != TARGET_ALLOC_DEFAULT && kind != TARGET_ALLOC_SHARED) {
+      printf("[host] FAIL: SHMMEM: kind %" PRId32 " (%s) not supported\n",
+             kind, alloc_kind_name(kind));
+      return nullptr;
+    }
     // In HERO (SVM): ptr = hst_ptr. Here only if the device can see it.
-    // hst_ptr == nullptr (omp_target_alloc) is not supported.
+    // hst_ptr == nullptr (omp_target_alloc, llvm_omp_target_alloc_shared)
+    // would need an allocation: not supported yet.
     if (hst_ptr == nullptr || !magia_is_shared(hst_ptr, (uint64_t)size)) {
-      printf("[host] SHMMEM: refused host buffer %p (%" PRId64 " bytes), not "
-             "in .omp_offloaded_buffer_L2\n", hst_ptr, size);
+      if (kind == TARGET_ALLOC_SHARED)
+        printf("[host] SHMMEM: kind SHARED without valid host buffer "
+               "(llvm_omp_target_alloc_shared) not supported yet\n");
+      else
+        printf("[host] SHMMEM: refused host buffer %p (%" PRId64 " bytes), not "
+               "in .omp_offloaded_buffer_L2\n", hst_ptr, size);
       return nullptr;
     }
     return hst_ptr;
+  }
+
+  if (kind != TARGET_ALLOC_DEFAULT && kind != TARGET_ALLOC_DEVICE) {
+    printf("[host] FAIL: MEMCPY: kind %" PRId32 " (%s) not supported\n",
+           kind, alloc_kind_name(kind));
+    return nullptr;
   }
 
   return (void *)data_alloc((uint32_t)size);   // 0 (heap exhausted) -> nullptr

@@ -207,9 +207,9 @@ static int sum_region(int32_t dev, int32_t *A, int32_t *B, int32_t *result,
     const int64_t vsize = N * sizeof(int32_t);
     ptrdiff_t offs[3] = { 0, 0, 0 };
 
-    ptrs[0] = __tgt_rtl_data_alloc(dev, vsize, A, 0);
-    ptrs[1] = __tgt_rtl_data_alloc(dev, vsize, B, 0);
-    ptrs[2] = __tgt_rtl_data_alloc(dev, sizeof *result, result, 0);
+    ptrs[0] = __tgt_rtl_data_alloc(dev, vsize, A, TARGET_ALLOC_DEFAULT);
+    ptrs[1] = __tgt_rtl_data_alloc(dev, vsize, B, TARGET_ALLOC_DEFAULT);
+    ptrs[2] = __tgt_rtl_data_alloc(dev, sizeof *result, result, TARGET_ALLOC_DEFAULT);
     if (ptrs[0] == NULL || ptrs[1] == NULL || ptrs[2] == NULL ||
         // "to": A and B to the device (result is "from": not copied in)
         __tgt_rtl_data_submit(dev, ptrs[0], A, vsize) ||
@@ -279,11 +279,20 @@ static int regions(void)
         // Negative check: a stack buffer is not visible to MAGIA, SHMMEM
         //    must refuse it (the plugin prints the reason)
         printf("[host] --- MAGIADEV_SHMMEM with a stack buffer: must be refused ---\n");
-        if (__tgt_rtl_data_alloc(MAGIADEV_SHMMEM, sizeof A, A, 0) != NULL) {
+        if (__tgt_rtl_data_alloc(MAGIADEV_SHMMEM, sizeof A, A, TARGET_ALLOC_DEFAULT) != NULL) {
             printf("[host] FAIL: SHMMEM accepted a buffer outside the L2\n");
             return -1;
         }
         printf("[host] SHMMEM: stack buffer refused, as expected\n");
+
+        // Negative check: as llvm_omp_target_alloc_shared does (kind SHARED,
+        // no host buffer): needs an allocation, not supported yet
+        printf("[host] --- MAGIADEV_SHMMEM, kind SHARED without host buffer: must be refused ---\n");
+        if (__tgt_rtl_data_alloc(MAGIADEV_SHMMEM, sizeof A, NULL, TARGET_ALLOC_SHARED) != NULL) {
+            printf("[host] FAIL: SHMMEM accepted kind SHARED without host buffer\n");
+            return -1;
+        }
+        printf("[host] SHMMEM: kind SHARED without host buffer refused, as expected\n");
     }
 
     return 0;
@@ -304,7 +313,7 @@ static int regions(void)
 
     // #pragma omp target map(to: tmp_1)
     {
-        void *p1 = __tgt_rtl_data_alloc(DEVICE_ID, sizeof tmp_1, &tmp_1, 0);
+        void *p1 = __tgt_rtl_data_alloc(DEVICE_ID, sizeof tmp_1, &tmp_1, TARGET_ALLOC_DEFAULT);
         ptrdiff_t off = 0;
         if (p1 == NULL ||                                    // "to": copy into L2
             __tgt_rtl_data_submit(DEVICE_ID, p1, &tmp_1, sizeof tmp_1) ||
@@ -316,8 +325,8 @@ static int regions(void)
 
     // #pragma omp target map(tofrom: tmp_1, tmp_2)  { tmp_1 = tmp_2; }
     {
-        void *ptrs[2] = { __tgt_rtl_data_alloc(DEVICE_ID, sizeof tmp_1, &tmp_1, 0),
-                          __tgt_rtl_data_alloc(DEVICE_ID, sizeof tmp_2, &tmp_2, 0) };
+        void *ptrs[2] = { __tgt_rtl_data_alloc(DEVICE_ID, sizeof tmp_1, &tmp_1, TARGET_ALLOC_DEFAULT),
+                          __tgt_rtl_data_alloc(DEVICE_ID, sizeof tmp_2, &tmp_2, TARGET_ALLOC_DEFAULT) };
         ptrdiff_t offs[2] = { 0, 0 };
         if (ptrs[0] == NULL || ptrs[1] == NULL ||
             __tgt_rtl_data_submit(DEVICE_ID, ptrs[0], &tmp_1, sizeof tmp_1) ||

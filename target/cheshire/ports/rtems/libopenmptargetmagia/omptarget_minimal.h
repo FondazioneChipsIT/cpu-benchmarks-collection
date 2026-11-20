@@ -34,6 +34,22 @@ extern "C" {
 #define MAGIADEV_SHMMEM (0)
 #define MAGIADEV_MEMCPY (1)
 
+/*
+ * Allocation kind passed to __tgt_rtl_data_alloc (omptarget.h, same values).
+ * libomptarget uses TARGET_ALLOC_DEFAULT for map/private/firstprivate and
+ * omp_target_alloc; the other kinds come only from
+ * llvm_omp_target_alloc_{device,host,shared}, always with hst_ptr == NULL.
+ * Accepted by the MAGIA plugin:
+ *   MAGIADEV_SHMMEM  TARGET_ALLOC_DEFAULT, TARGET_ALLOC_SHARED
+ *   MAGIADEV_MEMCPY  TARGET_ALLOC_DEFAULT, TARGET_ALLOC_DEVICE
+ */
+enum TargetAllocTy {
+  TARGET_ALLOC_DEVICE = 0,
+  TARGET_ALLOC_HOST,
+  TARGET_ALLOC_SHARED,
+  TARGET_ALLOC_DEFAULT
+};
+
 /// This struct is a record of an entry point or global. For a function
 /// entry point the size is expected to be zero
 struct __tgt_offload_entry {

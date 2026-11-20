@@ -37,12 +37,20 @@
  * ELF built with the HERO clang, resolves the "#pragma omp target" kernels
  * from its .symtab, prepares the mailboxes of offload_layout.h, enables the
  * MAGIA fetch and runs the target regions with the HERO mailbox protocol
- * (START / DONE / STOP), checking the map(tofrom) result.
+ * (START / DONE / STOP), checking the result.
  *
  * Build with the MAGIA test test_omp_offload embedded:
  *   make build BENCHMARK=rtems PLATFORM=cheshire \
  *       MAGIA_ELF=~/magia-sdk/build_1tile/bin/test_omp_offload
  */
+
+/*
+ * Test selection: it must match the regions() of the kernels_omp.c the MAGIA
+ * ELF was built from (the check in Init() refuses a different region count).
+ *   defined:   vector sum, 1 region   map(to: A, B) map(from: result)
+ *   commented: previous test, 3 regions   nop, map(to), map(tofrom)
+ */
+//#define TEST_OMP_SUMVEC
 
 #include <rtems.h>
 #include <tmacros.h>
@@ -122,12 +130,16 @@ static void build_host_entries( void )
 }
 
 // The host code of regions() below is NOT generic: it knows what each region
-// maps (no data, map(to), map(tofrom)), which is not in the MAGIA ELF. It is
+// maps, which is not in the MAGIA ELF. It is
 // written for these regions, by index = k-th #pragma omp target of regions().
 // If target regions are added, removed or reordered in kernels_omp.c, update
 // this enum and regions(): the check in Init() refuses a different count,
 // otherwise a shifted index would run the wrong kernel with the wrong args.
-enum { K_NOP, K_MAP_TO, K_MAP_TOFROM, K_USED };
+#ifdef TEST_OMP_SUMVEC
+enum { K_SUM, K_USED };                          // map(to: A, B) map(from: result)
+#else
+enum { K_NOP, K_MAP_TO, K_MAP_TOFROM, K_USED };  // no data, map(to), map(tofrom)
+#endif
 
 // ===========================================================================
 // PART 2 - what the HERO plugin does (host side) is in libopenmptargetmagia
@@ -150,6 +162,54 @@ static struct __tgt_target_table *table;
 // of the host part of kernels_omp.c and executed by libomptarget (alloc, submit of
 // "to", run, retrieve of "from", delete), one region at a time.
 // ---------------------------------------------------------------------------
+#ifdef TEST_OMP_SUMVEC
+#define N 128
+
+static int regions(void)
+{
+    int32_t A[N];   /* input */
+    int32_t B[N];   /* input */
+    int32_t result = 0;
+    int32_t expected = 0;
+
+    /* A[i] = i, B[i] = 10 * i */
+    for (int i = 0; i < N; i++) {
+        A[i] = i;
+        B[i] = 10 * i;
+        expected += A[i] + B[i];
+    }
+
+    // #pragma omp target device(1) map(to: A, B) map(from: result)
+    // Kernel arguments, in clang's order: A, B, result
+    // (offload_sizes 512, 512, 4; offload_maptypes 33 to, 33 to, 34 from).
+    // device(1) is the device number of a clang-compiled host: here the plugin
+    // has a single device, DEVICE_ID.
+    {
+        void *ptrs[3] = { __tgt_rtl_data_alloc(DEVICE_ID, sizeof A, A, 0),
+                          __tgt_rtl_data_alloc(DEVICE_ID, sizeof B, B, 0),
+                          __tgt_rtl_data_alloc(DEVICE_ID, sizeof result, &result, 0) };
+        ptrdiff_t offs[3] = { 0, 0, 0 };
+        if (ptrs[0] == NULL || ptrs[1] == NULL || ptrs[2] == NULL ||
+            // "to": copy A and B into L2 (result is "from": not copied in)
+            __tgt_rtl_data_submit(DEVICE_ID, ptrs[0], A, sizeof A) ||
+            __tgt_rtl_data_submit(DEVICE_ID, ptrs[1], B, sizeof B) ||
+            __tgt_rtl_run_target_region(DEVICE_ID, ENTRY(K_SUM), ptrs, offs, 3) ||
+            // "from": copy result back to the host
+            __tgt_rtl_data_retrieve(DEVICE_ID, &result, ptrs[2], sizeof result) ||
+            __tgt_rtl_data_delete(DEVICE_ID, ptrs[0]) ||
+            __tgt_rtl_data_delete(DEVICE_ID, ptrs[1]) ||
+            __tgt_rtl_data_delete(DEVICE_ID, ptrs[2]))
+            return -1;
+    }
+
+    printf("[host] result = %" PRId32 " (expected %" PRId32 ")\n", result, expected);
+    if (result != expected) {
+        printf("[host] FAIL: wrong sum\n");
+        return -1;
+    }
+    return 0;
+}
+#else  /* !TEST_OMP_SUMVEC: previous test */
 static int regions(void)
 {
     uint32_t tmp_1 = 5;
@@ -199,6 +259,7 @@ static int regions(void)
     }
     return 0;
 }
+#endif /* TEST_OMP_SUMVEC */
 
 static rtems_task Init( rtems_task_argument ignored )
 {
